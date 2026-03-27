@@ -1,0 +1,2 @@
+[console_scripts]
+server = Meta.server.app:main

@@ -186,4 +186,4 @@ python baseline/run_baseline.py
 
 **Digital Yodha** — Built for the OpenEnv Hackathon 2025
 - Sangisetti Akarsh
-- Kasarika Jivrajika
+- Sarika Jivrajika
