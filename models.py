@@ -5,37 +5,55 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-Data models for the Meta Multi-Agent Environment.
+Data models for the Meta Multi-Agent Environment v2.
 
-Covers 4 real-world agents:
-  1. Email Triage
-  2. Code Review
-  3. Data Cleaning
-  4. Content Moderation
+The real OpenEnv create_app() validates actions against the Action base class
+which requires a `message` field. We use that field to carry a JSON-encoded
+payload so all 4 agents share one unified action schema.
+
+Action format (send as JSON string in `message`):
+{
+  "agent": "email_triage",
+  "task_id": "email_triage_easy",
+  "payload": { ... task-specific fields ... }
+}
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 from openenv.core.env_server.types import Action, Observation
 from pydantic import Field
 
 
-# ─── SHARED ───────────────────────────────────────────────────────────────────
-
 class MetaAction(Action):
-    """Universal action for the Meta multi-agent environment."""
+    """
+    Universal action for all 4 Meta agents.
 
-    agent: str = Field(..., description="Agent name: email_triage | code_review | data_cleaning | content_moderation")
-    task_id: str = Field(..., description="Task ID e.g. email_triage_easy")
-    payload: Dict[str, Any] = Field(default_factory=dict, description="Task-specific action payload")
+    Pack your full action as a JSON string in the `message` field.
+
+    Example:
+        message = '{"agent": "email_triage", "task_id": "email_triage_easy", "payload": {"classification": "spam"}}'
+    """
+    message: str = Field(
+        ...,
+        description=(
+            'JSON string: {"agent": "<agent>", "task_id": "<task_id>", "payload": {...}}. '
+            "Agents: email_triage | code_review | data_cleaning | content_moderation. "
+            "Tasks: <agent>_easy | <agent>_medium | <agent>_hard."
+        ),
+        min_length=2,
+    )
 
 
 class MetaObservation(Observation):
-    """Universal observation from the Meta multi-agent environment."""
-
-    agent: str = Field(default="", description="Agent that produced this observation")
-    task_id: str = Field(default="", description="Current task ID")
+    """
+    Observation returned after each step in the Meta environment.
+    Contains task context, grader feedback, and score (0.0 to 1.0).
+    """
+    agent: str = Field(default="", description="Which agent produced this observation")
+    task_id: str = Field(default="", description="Current task identifier")
     difficulty: str = Field(default="", description="Task difficulty: easy | medium | hard")
-    context: Dict[str, Any] = Field(default_factory=dict, description="Task context data shown to agent")
-    instructions: str = Field(default="", description="What the agent needs to do")
-    feedback: str = Field(default="", description="Feedback from last action")
-    score: float = Field(default=0.0, description="Score from last action (0.0 to 1.0)")
+    context: Dict[str, Any] = Field(default_factory=dict, description="Task data shown to the agent")
+    instructions: str = Field(default="", description="What the agent must do and what payload format to use")
+    feedback: str = Field(default="", description="Grader feedback explaining the score")
+    score: float = Field(default=0.0, ge=0.0, le=1.0, description="Grader score 0.0=fail 1.0=perfect")
+    partial_credits: Dict[str, Any] = Field(default_factory=dict, description="Per-criterion score breakdown")
