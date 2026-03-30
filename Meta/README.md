@@ -1,255 +1,291 @@
----
-title: Meta Environment Server
-emoji: 🎳
-colorFrom: gray
-colorTo: red
-sdk: docker
-pinned: false
-app_port: 8000
-base_path: /web
-tags:
-  - openenv
+# Meta Multi-Agent OpenEnv
+
+> A unified OpenEnv environment featuring **4 specialized AI agents** across **12 real-world tasks**.
+> Built for the OpenEnv Hackathon 2026 by Team Digital Yodha.
+
 ---
 
-# Meta Environment
+## What Is This?
 
-A simple test environment that echoes back messages. Perfect for testing the env APIs as well as demonstrating environment usage patterns.
+**Meta** is a multi-domain reinforcement learning environment where AI agents learn to perform
+real-world workplace tasks across four distinct domains:
 
-## Quick Start
+| Agent | Domain | Real-World Use Case |
+|-------|--------|-------------------|
+| Email Triage | Workplace communication | Classify, prioritize, and respond to emails |
+| Code Review | Software engineering | Detect syntax errors, logic bugs, security vulnerabilities |
+| Data Cleaning | Data engineering | Find missing values, fix types, detect outliers |
+| Content Moderation | Trust & Safety | Detect explicit, subtle, and context-dependent harmful content |
 
-The simplest way to use the Meta environment is through the `MetaEnv` class:
+Each agent has **3 tasks** (easy, medium, hard) with deterministic graders that score
+agent performance from 0.0 to 1.0 with partial credit.
 
-```python
-from Meta import MetaAction, MetaEnv
+---
 
-try:
-    # Create environment from Docker image
-    Metaenv = MetaEnv.from_docker_image("Meta-env:latest")
+## Environment Design
 
-    # Reset
-    result = Metaenv.reset()
-    print(f"Reset: {result.observation.echoed_message}")
+### Action Space
 
-    # Send multiple messages
-    messages = ["Hello, World!", "Testing echo", "Final message"]
+All actions use a unified JSON-in-message format compatible with the OpenEnv spec:
 
-    for msg in messages:
-        result = Metaenv.step(MetaAction(message=msg))
-        print(f"Sent: '{msg}'")
-        print(f"  → Echoed: '{result.observation.echoed_message}'")
-        print(f"  → Length: {result.observation.message_length}")
-        print(f"  → Reward: {result.reward}")
-
-finally:
-    # Always clean up
-    Metaenv.close()
+```json
+POST /step
+{
+  "action": {
+    "message": "{\"agent\": \"email_triage\", \"task_id\": \"email_triage_easy\", \"payload\": {\"classification\": \"spam\"}}"
+  }
+}
 ```
 
-That's it! The `MetaEnv.from_docker_image()` method handles:
-- Starting the Docker container
-- Waiting for the server to be ready
-- Connecting to the environment
-- Container cleanup when you call `close()`
+### Observation Space
 
-## Building the Docker Image
+```json
+{
+  "observation": {
+    "agent": "email_triage",
+    "task_id": "email_triage_easy",
+    "difficulty": "easy",
+    "context": { "email": { "subject": "...", "body": "...", "sender": "..." } },
+    "instructions": "Classify the email as spam, important, or newsletter.",
+    "feedback": "[OK] Correct! 'spam' is right.",
+    "score": 1.0,
+    "partial_credits": { "classification": true }
+  },
+  "reward": 1.0,
+  "done": true
+}
+```
 
-Before using the environment, you need to build the Docker image:
+### Reward Function
+
+- Score range: **0.0 to 1.0** (never binary — always partial credit)
+- **Partial credits** per criterion (e.g. 3/5 bugs found = 0.6)
+- **Penalty** of -0.1 for empty/malformed payloads
+- **Episode average** tracked in metadata across multi-task runs
+- Graders are deterministic and reproducible
+
+---
+
+## Task Descriptions
+
+### Email Triage Agent
+
+| Task | Difficulty | Description |
+|------|-----------|-------------|
+| `email_triage_easy` | Easy | Classify a single email: spam, important, or newsletter |
+| `email_triage_medium` | Medium | Prioritize 10 workplace emails by urgency |
+| `email_triage_hard` | Hard | Draft a professional reply to a complex customer complaint |
+
+**Easy payload:**
+```json
+{"classification": "spam"}
+```
+
+**Medium payload:**
+```json
+{"order": ["m1", "m5", "m3", "m10", "m6", "m8", "m2", "m9", "m4", "m7"]}
+```
+
+**Hard payload:**
+```json
+{"reply": "Dear Customer, I sincerely apologize for the inconvenience..."}
+```
+
+---
+
+### Code Review Agent
+
+| Task | Difficulty | Description |
+|------|-----------|-------------|
+| `code_review_easy` | Easy | Find syntax errors in a Python function |
+| `code_review_medium` | Medium | Identify 4 logical bugs and suggest fixes |
+| `code_review_hard` | Hard | Detect 5 security vulnerabilities (SQL injection, XSS, command injection, insecure deserialization) |
+
+**Hard payload:**
+```json
+{
+  "vulnerabilities": [
+    {"type": "sql_injection", "location": "get_user_by_name", "fix": "use parameterized queries"},
+    {"type": "xss", "location": "render_comment", "fix": "sanitize user input"},
+    {"type": "sql_injection", "location": "login", "fix": "use parameterized queries"},
+    {"type": "command_injection", "location": "run_report", "fix": "avoid shell=True"},
+    {"type": "insecure_deserialization", "location": "load_user_data", "fix": "use json instead of pickle"}
+  ]
+}
+```
+
+---
+
+### Data Cleaning Agent
+
+| Task | Difficulty | Description |
+|------|-----------|-------------|
+| `data_cleaning_easy` | Easy | Identify missing values and duplicate rows |
+| `data_cleaning_medium` | Medium | Fix 5 data type/format issues and return cleaned dataset |
+| `data_cleaning_hard` | Hard | Detect outliers via IQR, impute missing values, return clean dataset |
+
+**Easy payload:**
+```json
+{
+  "missing": ["age (row 2)", "name (row 4)", "email (row 5)", "salary (row 6)"],
+  "duplicates": [1, 3]
+}
+```
+
+---
+
+### Content Moderation Agent
+
+| Task | Difficulty | Description |
+|------|-----------|-------------|
+| `content_moderation_easy` | Easy | Classify 7 posts as safe or harmful (explicit content) |
+| `content_moderation_medium` | Medium | Detect subtle toxicity, sarcasm, implicit hostility across 8 posts |
+| `content_moderation_hard` | Hard | Context-aware moderation: same text, 2 different contexts, 3 cases |
+
+**Hard payload:**
+```json
+{
+  "decisions": [
+    {"id": "h1", "context_a_label": "safe", "context_b_label": "harmful"},
+    {"id": "h2", "context_a_label": "safe", "context_b_label": "harmful"},
+    {"id": "h3", "context_a_label": "safe", "context_b_label": "harmful"}
+  ]
+}
+```
+
+---
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/reset` | Reset environment, start new episode |
+| POST | `/step` | Execute action, receive scored observation |
+| GET | `/state` | Get current environment state |
+| GET | `/health` | Health check |
+| GET | `/schema` | Action and observation JSON schemas |
+| GET | `/metadata` | Environment metadata |
+| GET | `/tasks` | All 12 tasks with exact payload schemas |
+| POST | `/grader` | Score an action without side effects |
+| POST | `/baseline` | Run GPT-4o-mini baseline on all 12 tasks |
+| WS | `/ws` | WebSocket for persistent agent sessions |
+
+---
+
+## Setup & Usage
+
+### Local Development
 
 ```bash
-# From project root
-docker build -t Meta-env:latest -f server/Dockerfile .
+git clone https://github.com/YOUR_USERNAME/meta-openenv.git
+cd meta-openenv/Meta
+pip install openenv-core
+uv sync
+uv run --project . server
+# Server running at http://localhost:8000
 ```
 
-## Deploying to Hugging Face Spaces
-
-You can easily deploy your OpenEnv environment to Hugging Face Spaces using the `openenv push` command:
+### Docker
 
 ```bash
-# From the environment directory (where openenv.yaml is located)
-openenv push
+# Build from repo root
+docker build -t meta-env:latest -f server/Dockerfile .
 
-# Or specify options
-openenv push --namespace my-org --private
+# Run
+docker run -p 7860:7860 meta-env:latest
+
+# With OpenAI key for baseline
+docker run -p 7860:7860 -e OPENAI_API_KEY=sk-... meta-env:latest
 ```
 
-The `openenv push` command will:
-1. Validate that the directory is an OpenEnv environment (checks for `openenv.yaml`)
-2. Prepare a custom build for Hugging Face Docker space (enables web interface)
-3. Upload to Hugging Face (ensuring you're logged in)
-
-### Prerequisites
-
-- Authenticate with Hugging Face: The command will prompt for login if not already authenticated
-
-### Options
-
-- `--directory`, `-d`: Directory containing the OpenEnv environment (defaults to current directory)
-- `--repo-id`, `-r`: Repository ID in format 'username/repo-name' (defaults to 'username/env-name' from openenv.yaml)
-- `--base-image`, `-b`: Base Docker image to use (overrides Dockerfile FROM)
-- `--private`: Deploy the space as private (default: public)
-
-### Examples
+### Test All Endpoints
 
 ```bash
-# Push to your personal namespace (defaults to username/env-name from openenv.yaml)
-openenv push
+# Health
+curl http://localhost:7860/health
 
-# Push to a specific repository
-openenv push --repo-id my-org/my-env
+# List all tasks
+curl http://localhost:7860/tasks
 
-# Push with a custom base image
-openenv push --base-image ghcr.io/meta-pytorch/openenv-base:latest
+# Reset
+curl -X POST http://localhost:7860/reset -H "Content-Type: application/json" -d '{}'
 
-# Push as a private space
-openenv push --private
+# Step - Email triage
+curl -X POST http://localhost:7860/step \
+  -H "Content-Type: application/json" \
+  -d '{"action": {"message": "{\"agent\": \"email_triage\", \"task_id\": \"email_triage_easy\", \"payload\": {\"classification\": \"spam\"}}"}}'
 
-# Combine options
-openenv push --repo-id my-org/my-env --base-image custom-base:latest --private
+# Grader - Code review perfect score
+curl -X POST http://localhost:7860/grader \
+  -H "Content-Type: application/json" \
+  -d '{"message": "{\"agent\": \"code_review\", \"task_id\": \"code_review_hard\", \"payload\": {\"vulnerabilities\": [{\"type\": \"sql_injection\", \"location\": \"get_user_by_name\", \"fix\": \"parameterized queries\"}, {\"type\": \"xss\", \"location\": \"render_comment\", \"fix\": \"sanitize html\"}, {\"type\": \"sql_injection\", \"location\": \"login\", \"fix\": \"parameterized queries\"}, {\"type\": \"command_injection\", \"location\": \"run_report\", \"fix\": \"no shell=True\"}, {\"type\": \"insecure_deserialization\", \"location\": \"load_user_data\", \"fix\": \"use json\"}]}}"}'
 ```
 
-After deployment, your space will be available at:
-`https://huggingface.co/spaces/<repo-id>`
-
-The deployed space includes:
-- **Web Interface** at `/web` - Interactive UI for exploring the environment
-- **API Documentation** at `/docs` - Full OpenAPI/Swagger interface
-- **Health Check** at `/health` - Container health monitoring
-- **WebSocket** at `/ws` - Persistent session endpoint for low-latency interactions
-
-## Environment Details
-
-### Action
-**MetaAction**: Contains a single field
-- `message` (str) - The message to echo back
-
-### Observation
-**MetaObservation**: Contains the echo response and metadata
-- `echoed_message` (str) - The message echoed back
-- `message_length` (int) - Length of the message
-- `reward` (float) - Reward based on message length (length × 0.1)
-- `done` (bool) - Always False for echo environment
-- `metadata` (dict) - Additional info like step count
-
-### Reward
-The reward is calculated as: `message_length × 0.1`
-- "Hi" → reward: 0.2
-- "Hello, World!" → reward: 1.3
-- Empty message → reward: 0.0
-
-## Advanced Usage
-
-### Connecting to an Existing Server
-
-If you already have a Meta environment server running, you can connect directly:
-
-```python
-from Meta import MetaEnv
-
-# Connect to existing server
-Metaenv = MetaEnv(base_url="<ENV_HTTP_URL_HERE>")
-
-# Use as normal
-result = Metaenv.reset()
-result = Metaenv.step(MetaAction(message="Hello!"))
-```
-
-Note: When connecting to an existing server, `Metaenv.close()` will NOT stop the server.
-
-### Using the Context Manager
-
-The client supports context manager usage for automatic connection management:
-
-```python
-from Meta import MetaAction, MetaEnv
-
-# Connect with context manager (auto-connects and closes)
-with MetaEnv(base_url="http://localhost:8000") as env:
-    result = env.reset()
-    print(f"Reset: {result.observation.echoed_message}")
-    # Multiple steps with low latency
-    for msg in ["Hello", "World", "!"]:
-        result = env.step(MetaAction(message=msg))
-        print(f"Echoed: {result.observation.echoed_message}")
-```
-
-The client uses WebSocket connections for:
-- **Lower latency**: No HTTP connection overhead per request
-- **Persistent session**: Server maintains your environment state
-- **Efficient for episodes**: Better for many sequential steps
-
-### Concurrent WebSocket Sessions
-
-The server supports multiple concurrent WebSocket connections. To enable this,
-modify `server/app.py` to use factory mode:
-
-```python
-# In server/app.py - use factory mode for concurrent sessions
-app = create_app(
-    MetaEnvironment,  # Pass class, not instance
-    MetaAction,
-    MetaObservation,
-    max_concurrent_envs=4,  # Allow 4 concurrent sessions
-)
-```
-
-Then multiple clients can connect simultaneously:
-
-```python
-from Meta import MetaAction, MetaEnv
-from concurrent.futures import ThreadPoolExecutor
-
-def run_episode(client_id: int):
-    with MetaEnv(base_url="http://localhost:8000") as env:
-        result = env.reset()
-        for i in range(10):
-            result = env.step(MetaAction(message=f"Client {client_id}, step {i}"))
-        return client_id, result.observation.message_length
-
-# Run 4 episodes concurrently
-with ThreadPoolExecutor(max_workers=4) as executor:
-    results = list(executor.map(run_episode, range(4)))
-```
-
-## Development & Testing
-
-### Direct Environment Testing
-
-Test the environment logic directly without starting the HTTP server:
+### Run Baseline
 
 ```bash
-# From the server directory
-python3 server/Meta_environment.py
+export OPENAI_API_KEY=sk-...
+python baseline.py
 ```
 
-This verifies that:
-- Environment resets correctly
-- Step executes actions properly
-- State tracking works
-- Rewards are calculated correctly
+---
 
-### Running Locally
+## Baseline Scores (GPT-4o-mini)
 
-Run the server locally for development:
+| Task | Difficulty | Score |
+|------|-----------|-------|
+| email_triage_easy | Easy | 1.00 |
+| email_triage_medium | Medium | 0.80 |
+| email_triage_hard | Hard | 0.67 |
+| code_review_easy | Easy | 1.00 |
+| code_review_medium | Medium | 0.75 |
+| code_review_hard | Hard | 0.80 |
+| data_cleaning_easy | Easy | 1.00 |
+| data_cleaning_medium | Medium | 0.67 |
+| data_cleaning_hard | Hard | 0.67 |
+| content_moderation_easy | Easy | 1.00 |
+| content_moderation_medium | Medium | 0.75 |
+| content_moderation_hard | Hard | 0.50 |
+| **Average** | | **0.80** |
 
-```bash
-uvicorn server.app:app --reload
-```
+---
 
 ## Project Structure
 
 ```
 Meta/
-├── .dockerignore         # Docker build exclusions
-├── __init__.py            # Module exports
-├── README.md              # This file
-├── openenv.yaml           # OpenEnv manifest
-├── pyproject.toml         # Project metadata and dependencies
-├── uv.lock                # Locked dependencies (generated)
-├── client.py              # MetaEnv client
-├── models.py              # Action and Observation models
+├── models.py                    # Pydantic models: MetaAction, MetaObservation
+├── baseline.py                  # OpenAI baseline inference script
+├── openenv.yaml                 # OpenEnv spec metadata
+├── pyproject.toml               # Project dependencies
+├── README.md                    # This file
+├── __init__.py
 └── server/
-    ├── __init__.py        # Server module exports
-    ├── Meta_environment.py  # Core environment logic
-    ├── app.py             # FastAPI application (HTTP + WebSocket endpoints)
-    └── Dockerfile         # Container image definition
+    ├── app.py                   # FastAPI app with all endpoints
+    ├── Meta_environment.py      # All 4 agents + 12 tasks + graders
+    ├── Dockerfile               # Container for HF Spaces
+    ├── requirements.txt
+    └── __init__.py
 ```
+
+---
+
+## Why Meta?
+
+Most OpenEnv environments cover a single domain. **Meta is the first multi-domain
+environment** that lets a single agent learn to handle completely different real-world
+tasks in one unified interface. This makes it ideal for:
+
+- Training **generalist agents** that can switch between task types
+- Benchmarking **multi-task learning** capabilities of LLMs
+- Evaluating **transfer learning** between related domains (e.g. email triage -> content moderation)
+- Testing **robustness** of agents across varying difficulty levels
+
+---
+
+## Team
+
+**Digital Yodha** - OpenEnv Hackathon 2026
+
+- Sangisetti Akarsh
+- Kasarika Jivrajika

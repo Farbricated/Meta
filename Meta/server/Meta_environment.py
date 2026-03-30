@@ -34,14 +34,14 @@ except ImportError:
     from models import MetaAction, MetaObservation
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TASK DATA — richer, more varied datasets
-# ══════════════════════════════════════════════════════════════════════════════
+# ==============================================================================
+# TASK DATA - richer, more varied datasets
+# ==============================================================================
 
 EMAIL_EASY_VARIANTS = [
     {"id": "e1", "subject": "You won $1,000,000!!!", "sender": "promo@totally-legit-lottery.com",
      "body": "Click here to claim your prize now! Limited time offer!", "label": "spam"},
-    {"id": "e2", "subject": "Q3 Budget Review — Urgent Action Required", "sender": "cfo@company.com",
+    {"id": "e2", "subject": "Q3 Budget Review - Urgent Action Required", "sender": "cfo@company.com",
      "body": "Please review the attached Q3 budget before our board meeting tomorrow at 9 AM.", "label": "important"},
     {"id": "e3", "subject": "Your weekly digest from Medium", "sender": "noreply@medium.com",
      "body": "Top stories this week: AI trends, Python tips, and startup news.", "label": "newsletter"},
@@ -49,26 +49,26 @@ EMAIL_EASY_VARIANTS = [
      "body": "You have been selected. Click now to claim your free iPhone!", "label": "spam"},
     {"id": "e5", "subject": "Action Required: Sign the NDA before Friday", "sender": "legal@company.com",
      "body": "Please sign the attached NDA before Friday's partnership meeting. Deadline is strict.", "label": "important"},
-    {"id": "e6", "subject": "TechCrunch Newsletter — March 2026", "sender": "newsletter@techcrunch.com",
+    {"id": "e6", "subject": "TechCrunch Newsletter - March 2026", "sender": "newsletter@techcrunch.com",
      "body": "This week's top stories in tech, AI, and startups.", "label": "newsletter"},
 ]
 
 EMAIL_MEDIUM_EMAILS = [
-    {"id": "m1", "subject": "🚨 Production server DOWN", "sender": "ops@company.com",
+    {"id": "m1", "subject": "[ALERT] Production server DOWN", "sender": "ops@company.com",
      "body": "All services unresponsive since 2 AM. Revenue impact: $10k/min.", "priority": 1, "category": "critical"},
     {"id": "m2", "subject": "Team lunch this Friday?", "sender": "colleague@company.com",
      "body": "Hey, thinking of doing a team lunch Friday. You in?", "priority": 9, "category": "social"},
-    {"id": "m3", "subject": "Acme Corp contract renewal — URGENT", "sender": "sales@company.com",
+    {"id": "m3", "subject": "Acme Corp contract renewal - URGENT", "sender": "sales@company.com",
      "body": "Acme contract expires Friday. They need signature or they walk.", "priority": 2, "category": "business"},
     {"id": "m4", "subject": "Weekly SaaS digest", "sender": "news@saasdigest.com",
      "body": "Top SaaS stories this week...", "priority": 10, "category": "newsletter"},
-    {"id": "m5", "subject": "⚠️ Security alert: unusual login", "sender": "security@company.com",
+    {"id": "m5", "subject": "[WARNING] Security alert: unusual login", "sender": "security@company.com",
      "body": "Unauthorized login attempt from IP 45.33.32.156. Verify immediately.", "priority": 1, "category": "critical"},
     {"id": "m6", "subject": "Invoice #INV-4521 overdue", "sender": "billing@vendor.com",
      "body": "Invoice of $5,400 was due 3 days ago. Payment needed to avoid service suspension.", "priority": 3, "category": "finance"},
-    {"id": "m7", "subject": "Happy Work Anniversary! 🎉", "sender": "hr@company.com",
+    {"id": "m7", "subject": "Happy Work Anniversary! ", "sender": "hr@company.com",
      "body": "Celebrating your 3 years with us!", "priority": 10, "category": "social"},
-    {"id": "m8", "subject": "Q4 product launch deck — review needed", "sender": "marketing@company.com",
+    {"id": "m8", "subject": "Q4 product launch deck - review needed", "sender": "marketing@company.com",
      "body": "Please review launch slides before Thursday. Launch is next Monday.", "priority": 3, "category": "business"},
     {"id": "m9", "subject": "Free AI productivity webinar", "sender": "promo@webinar.io",
      "body": "Join our free webinar on AI tools this Thursday.", "priority": 8, "category": "newsletter"},
@@ -81,7 +81,7 @@ EMAIL_MEDIUM_CORRECT_ORDER = ["m1", "m5", "m3", "m10", "m6", "m8", "m2", "m9", "
 EMAIL_HARD_CASES = [
     {
         "id": "h1",
-        "subject": "Completely unacceptable — Order #78234",
+        "subject": "Completely unacceptable - Order #78234",
         "sender": "furious.customer@email.com",
         "body": (
             "I have been a loyal customer for 5 years and I am absolutely furious. "
@@ -103,10 +103,10 @@ EMAIL_HARD_CASES = [
     },
     {
         "id": "h2",
-        "subject": "Billing error — charged twice for subscription",
+        "subject": "Billing error - charged twice for subscription",
         "sender": "billing.complaint@customer.com",
         "body": (
-            "I was charged twice for my annual subscription this month — once on March 1st "
+            "I was charged twice for my annual subscription this month - once on March 1st "
             "and again on March 15th. I have the bank statements as proof. "
             "This is a clear billing error on your end. I need an immediate refund of the "
             "duplicate charge and a written confirmation that this won't happen again. "
@@ -254,11 +254,11 @@ DATA_HARD = {
 
 MOD_EASY = [
     {"id": "c1", "text": "I hate you so much, I want to hurt you!",              "label": "harmful"},
-    {"id": "c2", "text": "Great weather today! Loving this sunshine ☀️",          "label": "safe"},
+    {"id": "c2", "text": "Great weather today! Loving this sunshine ",          "label": "safe"},
     {"id": "c3", "text": "All people from that group should be eliminated.",      "label": "harmful"},
     {"id": "c4", "text": "Can someone recommend a good Python beginner book?",   "label": "safe"},
     {"id": "c5", "text": "You're an absolute idiot and nobody likes you.",       "label": "harmful"},
-    {"id": "c6", "text": "I just finished a 5k run — feeling amazing!",          "label": "safe"},
+    {"id": "c6", "text": "I just finished a 5k run - feeling amazing!",          "label": "safe"},
     {"id": "c7", "text": "People like you should just disappear forever.",       "label": "harmful"},
 ]
 
@@ -267,7 +267,7 @@ MOD_MEDIUM = [
     {"id": "m2", "text": "I'm so done with these people. Absolutely insufferable.",          "label": "harmful"},
     {"id": "m3", "text": "That presentation was... very unique.",                            "label": "safe"},
     {"id": "m4", "text": "Some people just shouldn't be allowed to have opinions.",         "label": "harmful"},
-    {"id": "m5", "text": "Oh wow, another 'brilliant' idea from upper management 🙄",       "label": "harmful"},
+    {"id": "m5", "text": "Oh wow, another 'brilliant' idea from upper management ",       "label": "harmful"},
     {"id": "m6", "text": "Congrats on the promotion! Well deserved!",                       "label": "safe"},
     {"id": "m7", "text": "Not everyone is cut out for this kind of work, clearly.",         "label": "harmful"},
     {"id": "m8", "text": "Thanks for the feedback, I'll take it into account.",             "label": "safe"},
@@ -279,55 +279,55 @@ MOD_HARD = [
         "text": "You should just disappear.",
         "context_a": {"platform": "gaming_chat", "prior_message": "Your character died in the dungeon. Respawn?"},
         "label_a": "safe",
-        "reason_a": "Gaming context — disappear refers to the character, not the person",
+        "reason_a": "Gaming context - disappear refers to the character, not the person",
         "context_b": {"platform": "crisis_support_chat", "prior_message": "I've been feeling worthless and invisible lately"},
         "label_b": "harmful",
-        "reason_b": "Mental health context — could reinforce suicidal ideation",
+        "reason_b": "Mental health context - could reinforce suicidal ideation",
     },
     {
         "id": "h2",
         "text": "We need to take these people out.",
         "context_a": {"platform": "hr_slack", "prior_message": "Which team members should join the client dinner?"},
         "label_a": "safe",
-        "reason_a": "HR context — 'take out' means to dinner",
+        "reason_a": "HR context - 'take out' means to dinner",
         "context_b": {"platform": "extremist_forum", "prior_message": "These immigrants are ruining our country."},
         "label_b": "harmful",
-        "reason_b": "Extremist context — 'take out' implies physical violence",
+        "reason_b": "Extremist context - 'take out' implies physical violence",
     },
     {
         "id": "h3",
         "text": "Let's eliminate the competition.",
         "context_a": {"platform": "business_slack", "prior_message": "Q4 sales strategy meeting"},
         "label_a": "safe",
-        "reason_a": "Business context — standard competitive language",
+        "reason_a": "Business context - standard competitive language",
         "context_b": {"platform": "political_rally_chat", "prior_message": "The opposition party is destroying our values."},
         "label_b": "harmful",
-        "reason_b": "Political context — incitement to violence against political opponents",
+        "reason_b": "Political context - incitement to violence against political opponents",
     },
 ]
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# GRADERS v2 — partial credits, richer feedback
-# ══════════════════════════════════════════════════════════════════════════════
+# ==============================================================================
+# GRADERS v2 - partial credits, richer feedback
+# ==============================================================================
 
 def grade_email_easy(payload, context):
     correct = context["email"]["label"]
     given = payload.get("classification", "").strip().lower()
     valid = ["spam", "important", "newsletter"]
     if given == correct:
-        return 1.0, f"✅ Correct! '{correct}' is right.", {}
+        return 1.0, f"[OK] Correct! '{correct}' is right.", {}
     elif given in valid:
-        return 0.0, f"❌ Wrong. Expected '{correct}', got '{given}'.", {"classification": False}
+        return 0.0, f"[FAIL] Wrong. Expected '{correct}', got '{given}'.", {"classification": False}
     else:
-        return 0.0, f"❌ Invalid label '{given}'. Must be: spam | important | newsletter.", {"classification": False}
+        return 0.0, f"[FAIL] Invalid label '{given}'. Must be: spam | important | newsletter.", {"classification": False}
 
 
 def grade_email_medium(payload, context):
     order = payload.get("order", [])
     correct = EMAIL_MEDIUM_CORRECT_ORDER
     if not order:
-        return 0.0, "❌ No order provided.", {}
+        return 0.0, "[FAIL] No order provided.", {}
 
     partial = {}
     # Check top 2 critical (m1, m5)
@@ -342,14 +342,14 @@ def grade_email_medium(payload, context):
     partial = {"top2_critical": top2_ok, "top5_correct": top5_ok, "full_order": full_ok}
 
     if full_ok:
-        return 1.0, "✅ Perfect prioritization!", partial
+        return 1.0, "[OK] Perfect prioritization!", partial
     elif top5_ok:
-        return 0.8, f"🟡 Top 5 correct. Full order has {10-hits} mismatches.", partial
+        return 0.8, f"[PARTIAL] Top 5 correct. Full order has {10-hits} mismatches.", partial
     elif top2_ok:
-        return 0.5, f"🟡 Critical emails (m1, m5) correctly placed first. {hits}/10 positions correct.", partial
+        return 0.5, f"[PARTIAL] Critical emails (m1, m5) correctly placed first. {hits}/10 positions correct.", partial
     else:
         score = round(hits / 10, 2)
-        return score, f"🔴 {hits}/10 emails in correct position.", partial
+        return score, f"[ERROR] {hits}/10 emails in correct position.", partial
 
 
 def grade_email_hard(payload, context):
@@ -371,7 +371,7 @@ def grade_email_hard(payload, context):
     total = len(checks)
     score = round(passed / total, 2)
     missing = [k for k, v in checks.items() if not v]
-    feedback = f"{'✅' if score == 1.0 else '🟡' if score >= 0.6 else '🔴'} {passed}/{total} reply elements present."
+    feedback = f"{'[OK]' if score == 1.0 else '[PARTIAL]' if score >= 0.6 else '[ERROR]'} {passed}/{total} reply elements present."
     if missing:
         feedback += f" Missing: {', '.join(missing)}."
     return score, feedback, checks
@@ -382,9 +382,9 @@ def grade_code_easy(payload, context):
     keywords = context.get("keywords", ["colon", "syntax"])
     found = any(k in errors for k in keywords)
     if not payload.get("errors"):
-        return 0.0, "❌ No errors reported.", {"syntax_error_found": False}
-    return (1.0, "✅ Syntax error correctly identified.", {"syntax_error_found": True}) if found \
-        else (0.3, "🟡 Error mentioned but key issue not clearly described.", {"syntax_error_found": False})
+        return 0.0, "[FAIL] No errors reported.", {"syntax_error_found": False}
+    return (1.0, "[OK] Syntax error correctly identified.", {"syntax_error_found": True}) if found \
+        else (0.3, "[PARTIAL] Error mentioned but key issue not clearly described.", {"syntax_error_found": False})
 
 
 def grade_code_medium(payload):
@@ -404,7 +404,7 @@ def grade_code_medium(payload):
 
     passed = sum(checks.values())
     score = round(passed / 4, 2)
-    feedback = f"{'✅' if score==1.0 else '🟡' if score>=0.5 else '🔴'} {passed}/4 bugs found."
+    feedback = f"{'[OK]' if score==1.0 else '[PARTIAL]' if score>=0.5 else '[ERROR]'} {passed}/4 bugs found."
     missing = [k for k, v in checks.items() if not v]
     if missing: feedback += f" Missed: {', '.join(missing)}."
     return score, feedback, checks
@@ -430,7 +430,7 @@ def grade_code_hard(payload):
 
     passed = sum(checks.values())
     score = round(passed / 5, 2)
-    feedback = f"{'✅' if score==1.0 else '🟡' if score>=0.6 else '🔴'} {passed}/5 vulnerabilities found."
+    feedback = f"{'[OK]' if score==1.0 else '[PARTIAL]' if score>=0.6 else '[ERROR]'} {passed}/5 vulnerabilities found."
     missing = [k for k, v in checks.items() if not v]
     if missing: feedback += f" Missed: {', '.join(missing)}."
     return score, feedback, checks
@@ -450,7 +450,7 @@ def grade_data_easy(payload):
 
     passed_missing = sum(mc.values())
     score = round((passed_missing / 4 * 0.7) + (0.3 if dup_ok else 0.0), 2)
-    feedback = f"{'✅' if score==1.0 else '🟡' if score>=0.5 else '🔴'} Missing: {passed_missing}/4, Duplicates: {'✅' if dup_ok else '❌'}."
+    feedback = f"{'[OK]' if score==1.0 else '[PARTIAL]' if score>=0.5 else '[ERROR]'} Missing: {passed_missing}/4, Duplicates: {'[OK]' if dup_ok else '[FAIL]'}."
     return score, feedback, {**mc, "duplicates_correct": dup_ok}
 
 
@@ -467,7 +467,7 @@ def grade_data_medium(payload):
     }
     passed = sum(checks.values())
     score = round(passed / 6, 2)
-    feedback = f"{'✅' if score==1.0 else '🟡' if score>=0.5 else '🔴'} {passed}/6 data quality checks passed."
+    feedback = f"{'[OK]' if score==1.0 else '[PARTIAL]' if score>=0.5 else '[ERROR]'} {passed}/6 data quality checks passed."
     return score, feedback, checks
 
 
@@ -493,7 +493,7 @@ def grade_data_hard(payload):
     checks = {"outliers_correct": outlier_ok, "missing_correct": missing_ok, "imputation_valid": imputed_ok}
     passed = sum(checks.values())
     score = round(passed / 3, 2)
-    feedback = f"{'✅' if score==1.0 else '🟡' if score>=0.67 else '🔴'} {passed}/3 data operations correct."
+    feedback = f"{'[OK]' if score==1.0 else '[PARTIAL]' if score>=0.67 else '[ERROR]'} {passed}/3 data operations correct."
     return score, feedback, checks
 
 
@@ -503,7 +503,7 @@ def grade_mod_easy(payload):
     per = {id_: clf.get(id_) == label for id_, label in correct.items()}
     hits = sum(per.values())
     score = round(hits / len(correct), 2)
-    feedback = f"{'✅' if score==1.0 else '🟡' if score>=0.7 else '🔴'} {hits}/{len(correct)} posts correctly classified."
+    feedback = f"{'[OK]' if score==1.0 else '[PARTIAL]' if score>=0.7 else '[ERROR]'} {hits}/{len(correct)} posts correctly classified."
     return score, feedback, per
 
 
@@ -513,7 +513,7 @@ def grade_mod_medium(payload):
     per = {id_: clf.get(id_) == label for id_, label in correct.items()}
     hits = sum(per.values())
     score = round(hits / len(correct), 2)
-    feedback = f"{'✅' if score==1.0 else '🟡' if score>=0.6 else '🔴'} {hits}/{len(correct)} subtle posts correctly classified."
+    feedback = f"{'[OK]' if score==1.0 else '[PARTIAL]' if score>=0.6 else '[ERROR]'} {hits}/{len(correct)} subtle posts correctly classified."
     return score, feedback, per
 
 
@@ -528,13 +528,13 @@ def grade_mod_hard(payload):
     passed = sum(checks.values())
     total = len(checks)
     score = round(passed / total, 2)
-    feedback = f"{'✅' if score==1.0 else '🟡' if score>=0.5 else '🔴'} {passed}/{total} context-aware decisions correct."
+    feedback = f"{'[OK]' if score==1.0 else '[PARTIAL]' if score>=0.5 else '[ERROR]'} {passed}/{total} context-aware decisions correct."
     return score, feedback, checks
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ==============================================================================
 # ENVIRONMENT
-# ══════════════════════════════════════════════════════════════════════════════
+# ==============================================================================
 
 INSTRUCTIONS = {
     "email_triage_easy": (
