@@ -288,4 +288,4 @@ tasks in one unified interface. This makes it ideal for:
 **Digital Yodha** - OpenEnv Hackathon 2026
 
 - Sangisetti Akarsh
-- Kasarika Jivrajika
+- Sarika Jivrajika
