@@ -22,72 +22,135 @@ agent performance from 0.0 to 1.0 with partial credit.
 
 ---
 
-## Project Structure
+## Environment Design
 
+### Action Space
+
+All actions use a unified JSON-in-message format compatible with the OpenEnv spec:
+
+```json
+POST /step
+{
+  "action": {
+    "message": "{\"agent\": \"email_triage\", \"task_id\": \"email_triage_easy\", \"payload\": {\"classification\": \"spam\"}}"
+  }
+}
 ```
-Meta/                            <- repo root (this folder)
-├── README.md                    <- you are here
-├── Dockerfile                   <- root Dockerfile for HF Spaces
-├── Meta/                        <- OpenEnv environment package
-│   ├── models.py                <- Pydantic models: MetaAction, MetaObservation
-│   ├── baseline.py              <- OpenAI baseline inference script
-│   ├── openenv.yaml             <- OpenEnv spec metadata
-│   ├── pyproject.toml           <- Project dependencies
-│   ├── README.md                <- Detailed environment docs
-│   ├── __init__.py
-│   └── server/
-│       ├── app.py               <- FastAPI app + all endpoints
-│       ├── Meta_environment.py  <- All 4 agents + 12 tasks + graders
-│       ├── Dockerfile           <- Inner Dockerfile (local dev)
-│       ├── requirements.txt
-│       └── __init__.py
+
+### Observation Space
+
+```json
+{
+  "observation": {
+    "agent": "email_triage",
+    "task_id": "email_triage_easy",
+    "difficulty": "easy",
+    "context": { "email": { "subject": "...", "body": "...", "sender": "..." } },
+    "instructions": "Classify the email as spam, important, or newsletter.",
+    "feedback": "[OK] Correct! 'spam' is right.",
+    "score": 1.0,
+    "partial_credits": { "classification": true }
+  },
+  "reward": 1.0,
+  "done": true
+}
+```
+
+### Reward Function
+
+- Score range: **0.0 to 1.0** (never binary — always partial credit)
+- **Partial credits** per criterion (e.g. 3/5 bugs found = 0.6)
+- **Penalty** of -0.1 for empty/malformed payloads
+- **Episode average** tracked in metadata across multi-task runs
+- Graders are deterministic and reproducible
+
+---
+
+## Task Descriptions
+
+### Email Triage Agent
+
+| Task | Difficulty | Description |
+|------|-----------|-------------|
+| `email_triage_easy` | Easy | Classify a single email: spam, important, or newsletter |
+| `email_triage_medium` | Medium | Prioritize 10 workplace emails by urgency |
+| `email_triage_hard` | Hard | Draft a professional reply to a complex customer complaint |
+
+**Easy payload:**
+```json
+{"classification": "spam"}
+```
+
+**Medium payload:**
+```json
+{"order": ["m1", "m5", "m3", "m10", "m6", "m8", "m2", "m9", "m4", "m7"]}
+```
+
+**Hard payload:**
+```json
+{"reply": "Dear Customer, I sincerely apologize for the inconvenience..."}
 ```
 
 ---
 
-## Quick Start
+### Code Review Agent
 
-### Local Development
+| Task | Difficulty | Description |
+|------|-----------|-------------|
+| `code_review_easy` | Easy | Find syntax errors in a Python function |
+| `code_review_medium` | Medium | Identify 4 logical bugs and suggest fixes |
+| `code_review_hard` | Hard | Detect 5 security vulnerabilities (SQL injection, XSS, command injection, insecure deserialization) |
 
-```bash
-cd Meta
-pip install openenv-core uv
-uv sync
-uv run --project . server
-# Server running at http://localhost:8000
-# Docs at http://localhost:8000/docs
+**Hard payload:**
+```json
+{
+  "vulnerabilities": [
+    {"type": "sql_injection", "location": "get_user_by_name", "fix": "use parameterized queries"},
+    {"type": "xss", "location": "render_comment", "fix": "sanitize user input"},
+    {"type": "sql_injection", "location": "login", "fix": "use parameterized queries"},
+    {"type": "command_injection", "location": "run_report", "fix": "avoid shell=True"},
+    {"type": "insecure_deserialization", "location": "load_user_data", "fix": "use json instead of pickle"}
+  ]
+}
 ```
 
-### Docker (from repo root)
+---
 
-```bash
-docker build -t meta-env:latest .
-docker run -p 7860:7860 meta-env:latest
-# Server running at http://localhost:7860
+### Data Cleaning Agent
+
+| Task | Difficulty | Description |
+|------|-----------|-------------|
+| `data_cleaning_easy` | Easy | Identify missing values and duplicate rows |
+| `data_cleaning_medium` | Medium | Fix 5 data type/format issues and return cleaned dataset |
+| `data_cleaning_hard` | Hard | Detect outliers via IQR, impute missing values, return clean dataset |
+
+**Easy payload:**
+```json
+{
+  "missing": ["age (row 2)", "name (row 4)", "email (row 5)", "salary (row 6)"],
+  "duplicates": [1, 3]
+}
 ```
 
-### Test It Works
+---
 
-```bash
-# Health check
-curl http://localhost:7860/health
+### Content Moderation Agent
 
-# List all 12 tasks
-curl http://localhost:7860/tasks
+| Task | Difficulty | Description |
+|------|-----------|-------------|
+| `content_moderation_easy` | Easy | Classify 7 posts as safe or harmful (explicit content) |
+| `content_moderation_medium` | Medium | Detect subtle toxicity, sarcasm, implicit hostility across 8 posts |
+| `content_moderation_hard` | Hard | Context-aware moderation: same text, 2 different contexts, 3 cases |
 
-# Reset environment
-curl -X POST http://localhost:7860/reset \
-  -H "Content-Type: application/json" -d '{}'
-
-# Run a task - Email Triage Easy
-curl -X POST http://localhost:7860/step \
-  -H "Content-Type: application/json" \
-  -d '{"action": {"message": "{\"agent\": \"email_triage\", \"task_id\": \"email_triage_easy\", \"payload\": {\"classification\": \"important\"}}"}}'
-
-# Perfect score - Code Review Hard (all 5 vulns)
-curl -X POST http://localhost:7860/grader \
-  -H "Content-Type: application/json" \
-  -d '{"message": "{\"agent\": \"code_review\", \"task_id\": \"code_review_hard\", \"payload\": {\"vulnerabilities\": [{\"type\": \"sql_injection\", \"location\": \"get_user_by_name\", \"fix\": \"parameterized queries\"}, {\"type\": \"xss\", \"location\": \"render_comment\", \"fix\": \"sanitize html\"}, {\"type\": \"sql_injection\", \"location\": \"login\", \"fix\": \"parameterized queries\"}, {\"type\": \"command_injection\", \"location\": \"run_report\", \"fix\": \"no shell=True\"}, {\"type\": \"insecure_deserialization\", \"location\": \"load_user_data\", \"fix\": \"use json\"}]}}"}'
+**Hard payload:**
+```json
+{
+  "decisions": [
+    {"id": "h1", "context_a_label": "safe", "context_b_label": "harmful"},
+    {"id": "h2", "context_a_label": "safe", "context_b_label": "harmful"},
+    {"id": "h3", "context_a_label": "safe", "context_b_label": "harmful"}
+  ]
+}
 ```
 
 ---
@@ -109,103 +172,114 @@ curl -X POST http://localhost:7860/grader \
 
 ---
 
-## The 12 Tasks
+## Setup & Usage
 
-### Email Triage
-| Task ID | Difficulty | Description |
-|---------|-----------|-------------|
-| `email_triage_easy` | Easy | Classify email: spam, important, or newsletter |
-| `email_triage_medium` | Medium | Prioritize 10 workplace emails by urgency |
-| `email_triage_hard` | Hard | Draft reply to a complex customer complaint |
-
-### Code Review
-| Task ID | Difficulty | Description |
-|---------|-----------|-------------|
-| `code_review_easy` | Easy | Find syntax errors in Python code |
-| `code_review_medium` | Medium | Identify 4 logical bugs + suggest fixes |
-| `code_review_hard` | Hard | Detect 5 security vulnerabilities |
-
-### Data Cleaning
-| Task ID | Difficulty | Description |
-|---------|-----------|-------------|
-| `data_cleaning_easy` | Easy | Find missing values and duplicate rows |
-| `data_cleaning_medium` | Medium | Fix 5 data type/format issues |
-| `data_cleaning_hard` | Hard | Detect outliers + impute missing values |
-
-### Content Moderation
-| Task ID | Difficulty | Description |
-|---------|-----------|-------------|
-| `content_moderation_easy` | Easy | Classify 7 posts as safe or harmful |
-| `content_moderation_medium` | Medium | Detect subtle toxicity and sarcasm |
-| `content_moderation_hard` | Hard | Context-aware moderation (same text, 2 contexts) |
-
----
-
-## Action Format
-
-All actions use a unified JSON-in-message format:
-
-```json
-POST /step
-{
-  "action": {
-    "message": "{\"agent\": \"<agent>\", \"task_id\": \"<task_id>\", \"payload\": {...}}"
-  }
-}
-```
-
-Use `GET /tasks` to see the exact payload schema for each task.
-
----
-
-## Reward Design
-
-- Score range: **0.0 to 1.0** (always partial credit, never binary)
-- **Per-criterion breakdown** in `partial_credits` field
-- **Penalty** of -0.1 for empty payloads
-- **Episode average** tracked across multi-task runs
-- All graders are **deterministic and reproducible**
-
----
-
-## Baseline Scores (GPT-4o-mini)
-
-| Task | Score |
-|------|-------|
-| email_triage_easy | 1.00 |
-| email_triage_medium | 0.80 |
-| email_triage_hard | 0.67 |
-| code_review_easy | 1.00 |
-| code_review_medium | 0.75 |
-| code_review_hard | 0.80 |
-| data_cleaning_easy | 1.00 |
-| data_cleaning_medium | 0.67 |
-| data_cleaning_hard | 0.67 |
-| content_moderation_easy | 1.00 |
-| content_moderation_medium | 0.75 |
-| content_moderation_hard | 0.50 |
-| **Average** | **0.80** |
-
-### Run Baseline Yourself
+### Local Development
 
 ```bash
-cd Meta
+git clone https://github.com/YOUR_USERNAME/meta-openenv.git
+cd meta-openenv/Meta
+pip install openenv-core
+uv sync
+uv run --project . server
+# Server running at http://localhost:8000
+```
+
+### Docker
+
+```bash
+# Build from repo root
+docker build -t meta-env:latest -f server/Dockerfile .
+
+# Run
+docker run -p 7860:7860 meta-env:latest
+
+# With OpenAI key for baseline
+docker run -p 7860:7860 -e OPENAI_API_KEY=sk-... meta-env:latest
+```
+
+### Test All Endpoints
+
+```bash
+# Health
+curl http://localhost:7860/health
+
+# List all tasks
+curl http://localhost:7860/tasks
+
+# Reset
+curl -X POST http://localhost:7860/reset -H "Content-Type: application/json" -d '{}'
+
+# Step - Email triage
+curl -X POST http://localhost:7860/step \
+  -H "Content-Type: application/json" \
+  -d '{"action": {"message": "{\"agent\": \"email_triage\", \"task_id\": \"email_triage_easy\", \"payload\": {\"classification\": \"spam\"}}"}}'
+
+# Grader - Code review perfect score
+curl -X POST http://localhost:7860/grader \
+  -H "Content-Type: application/json" \
+  -d '{"message": "{\"agent\": \"code_review\", \"task_id\": \"code_review_hard\", \"payload\": {\"vulnerabilities\": [{\"type\": \"sql_injection\", \"location\": \"get_user_by_name\", \"fix\": \"parameterized queries\"}, {\"type\": \"xss\", \"location\": \"render_comment\", \"fix\": \"sanitize html\"}, {\"type\": \"sql_injection\", \"location\": \"login\", \"fix\": \"parameterized queries\"}, {\"type\": \"command_injection\", \"location\": \"run_report\", \"fix\": \"no shell=True\"}, {\"type\": \"insecure_deserialization\", \"location\": \"load_user_data\", \"fix\": \"use json\"}]}}"}'
+```
+
+### Run Baseline
+
+```bash
 export OPENAI_API_KEY=sk-...
 python baseline.py
 ```
 
 ---
 
+## Baseline Scores (GPT-4o-mini)
+
+| Task | Difficulty | Score |
+|------|-----------|-------|
+| email_triage_easy | Easy | 1.00 |
+| email_triage_medium | Medium | 0.80 |
+| email_triage_hard | Hard | 0.67 |
+| code_review_easy | Easy | 1.00 |
+| code_review_medium | Medium | 0.75 |
+| code_review_hard | Hard | 0.80 |
+| data_cleaning_easy | Easy | 1.00 |
+| data_cleaning_medium | Medium | 0.67 |
+| data_cleaning_hard | Hard | 0.67 |
+| content_moderation_easy | Easy | 1.00 |
+| content_moderation_medium | Medium | 0.75 |
+| content_moderation_hard | Hard | 0.50 |
+| **Average** | | **0.80** |
+
+---
+
+## Project Structure
+
+```
+Meta/
+├── models.py                    # Pydantic models: MetaAction, MetaObservation
+├── baseline.py                  # OpenAI baseline inference script
+├── openenv.yaml                 # OpenEnv spec metadata
+├── pyproject.toml               # Project dependencies
+├── README.md                    # This file
+├── __init__.py
+└── server/
+    ├── app.py                   # FastAPI app with all endpoints
+    ├── Meta_environment.py      # All 4 agents + 12 tasks + graders
+    ├── Dockerfile               # Container for HF Spaces
+    ├── requirements.txt
+    └── __init__.py
+```
+
+---
+
 ## Why Meta?
 
-Most OpenEnv environments cover a single domain. **Meta is a multi-domain
+Most OpenEnv environments cover a single domain. **Meta is the first multi-domain
 environment** that lets a single agent learn to handle completely different real-world
 tasks in one unified interface. This makes it ideal for:
 
-- Training **generalist agents** that switch between task types
+- Training **generalist agents** that can switch between task types
 - Benchmarking **multi-task learning** capabilities of LLMs
-- Evaluating **transfer learning** between related domains
-- Testing **robustness** across varying difficulty levels
+- Evaluating **transfer learning** between related domains (e.g. email triage -> content moderation)
+- Testing **robustness** of agents across varying difficulty levels
 
 ---
 
