@@ -1,3 +1,14 @@
+---
+title: Meta OpenEnv
+emoji: 🤖
+colorFrom: blue
+colorTo: purple
+sdk: docker
+pinned: false
+tags:
+  - openenv
+---
+
 # Meta Multi-Agent OpenEnv
 
 > A unified OpenEnv environment featuring **4 specialized AI agents** across **12 real-world tasks**.
@@ -177,19 +188,17 @@ POST /step
 ### Local Development
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/meta-openenv.git
-cd meta-openenv/Meta
-pip install openenv-core
-uv sync
-uv run --project . server
-# Server running at http://localhost:8000
+git clone https://huggingface.co/spaces/Flake56/meta-openenv
+cd meta-openenv
+pip install openenv-core openai fastapi uvicorn pydantic
+uvicorn server.app:app --host 0.0.0.0 --port 7860
 ```
 
 ### Docker
 
 ```bash
 # Build from repo root
-docker build -t meta-env:latest -f server/Dockerfile .
+docker build -t meta-env:latest .
 
 # Run
 docker run -p 7860:7860 meta-env:latest
@@ -202,23 +211,18 @@ docker run -p 7860:7860 -e OPENAI_API_KEY=sk-... meta-env:latest
 
 ```bash
 # Health
-curl http://localhost:7860/health
+curl https://Flake56-meta-openenv.hf.space/health
 
 # List all tasks
-curl http://localhost:7860/tasks
+curl https://Flake56-meta-openenv.hf.space/tasks
 
 # Reset
-curl -X POST http://localhost:7860/reset -H "Content-Type: application/json" -d '{}'
+curl -X POST https://Flake56-meta-openenv.hf.space/reset -H "Content-Type: application/json" -d '{}'
 
-# Step - Email triage
-curl -X POST http://localhost:7860/step \
+# Step - Email triage easy
+curl -X POST https://Flake56-meta-openenv.hf.space/step \
   -H "Content-Type: application/json" \
   -d '{"action": {"message": "{\"agent\": \"email_triage\", \"task_id\": \"email_triage_easy\", \"payload\": {\"classification\": \"spam\"}}"}}'
-
-# Grader - Code review perfect score
-curl -X POST http://localhost:7860/grader \
-  -H "Content-Type: application/json" \
-  -d '{"message": "{\"agent\": \"code_review\", \"task_id\": \"code_review_hard\", \"payload\": {\"vulnerabilities\": [{\"type\": \"sql_injection\", \"location\": \"get_user_by_name\", \"fix\": \"parameterized queries\"}, {\"type\": \"xss\", \"location\": \"render_comment\", \"fix\": \"sanitize html\"}, {\"type\": \"sql_injection\", \"location\": \"login\", \"fix\": \"parameterized queries\"}, {\"type\": \"command_injection\", \"location\": \"run_report\", \"fix\": \"no shell=True\"}, {\"type\": \"insecure_deserialization\", \"location\": \"load_user_data\", \"fix\": \"use json\"}]}}"}'
 ```
 
 ### Run Baseline
@@ -253,17 +257,17 @@ python baseline.py
 ## Project Structure
 
 ```
-Meta/
-├── models.py                    # Pydantic models: MetaAction, MetaObservation
+meta-openenv/
+├── Dockerfile                   # Container for HF Spaces
+├── README.md                    # This file
 ├── baseline.py                  # OpenAI baseline inference script
+├── models.py                    # Pydantic models: MetaAction, MetaObservation
 ├── openenv.yaml                 # OpenEnv spec metadata
 ├── pyproject.toml               # Project dependencies
-├── README.md                    # This file
 ├── __init__.py
 └── server/
     ├── app.py                   # FastAPI app with all endpoints
     ├── Meta_environment.py      # All 4 agents + 12 tasks + graders
-    ├── Dockerfile               # Container for HF Spaces
     ├── requirements.txt
     └── __init__.py
 ```
@@ -278,14 +282,22 @@ tasks in one unified interface. This makes it ideal for:
 
 - Training **generalist agents** that can switch between task types
 - Benchmarking **multi-task learning** capabilities of LLMs
-- Evaluating **transfer learning** between related domains (e.g. email triage -> content moderation)
+- Evaluating **transfer learning** between related domains (e.g. email triage → content moderation)
 - Testing **robustness** of agents across varying difficulty levels
 
 ---
 
 ## Team
 
-**Digital Yodha** - OpenEnv Hackathon 2026
+**Digital Yodha** — OpenEnv Hackathon 2026
 
-- Sangisetti Akarsh
-- Sarika Jivrajika
+| Name | GitHub |
+|------|--------|
+| Sangisetti Akarsh | [@Farbricated](https://github.com/Farbricated) |
+| Sarika Jivrajika | [@Sarika-stack23](https://github.com/Sarika-stack23) |
+
+---
+
+## License
+
+MIT License — feel free to use, modify, and build on this environment.
