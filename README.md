@@ -1,189 +1,217 @@
-# 🧠 Digital Yodha — OpenEnv Multi-Agent Environment
+# Meta Multi-Agent OpenEnv
 
-> A multi-domain AI agent training environment built for the OpenEnv Hackathon.
-> Covers four real-world task domains: Email Triage, Code Review, Data Cleaning, and Content Moderation.
-
----
-
-## 🌐 Overview
-
-**Digital Yodha** (meaning *Digital Warrior* in Hindi) is a unified OpenEnv-compliant environment featuring **4 specialized agents**, each tackling a distinct real-world task domain with **3 difficulty levels** (easy → medium → hard).
-
-| Agent | Domain | Tasks |
-|-------|--------|-------|
-| 📧 Email Triage | Customer / workplace email handling | Classify → Prioritize → Draft Reply |
-| 🔍 Code Review | Software quality assurance | Syntax → Logic Bugs → Security Vulns |
-| 🧹 Data Cleaning | Data quality engineering | Missing Values → Type Fixes → Outlier Imputation |
-| 🛡️ Content Moderation | Platform trust & safety | Explicit → Subtle Toxicity → Context-Aware |
+> A unified OpenEnv environment featuring **4 specialized AI agents** across **12 real-world tasks**.
+> Built for the OpenEnv Hackathon 2026 by Team Digital Yodha.
 
 ---
 
-## 🏗️ Project Structure
+## What Is This?
+
+**Meta** is a multi-domain reinforcement learning environment where AI agents learn to perform
+real-world workplace tasks across four distinct domains:
+
+| Agent | Domain | Real-World Use Case |
+|-------|--------|-------------------|
+| Email Triage | Workplace communication | Classify, prioritize, and respond to emails |
+| Code Review | Software engineering | Detect syntax errors, logic bugs, security vulnerabilities |
+| Data Cleaning | Data engineering | Find missing values, fix types, detect outliers |
+| Content Moderation | Trust & Safety | Detect explicit, subtle, and context-dependent harmful content |
+
+Each agent has **3 tasks** (easy, medium, hard) with deterministic graders that score
+agent performance from 0.0 to 1.0 with partial credit.
+
+---
+
+## Project Structure
 
 ```
-digital_yodha/
-├── app.py                          # FastAPI server (OpenEnv endpoints)
-├── models.py                       # Pydantic models: Observation, Action, Reward
-├── openenv.yaml                    # OpenEnv metadata + task registry
-├── requirements.txt
-├── Dockerfile
-├── environments/
-│   ├── email_triage/env.py
-│   ├── code_review/env.py
-│   ├── data_cleaning/env.py
-│   └── content_moderation/env.py
-├── baseline/
-│   └── run_baseline.py             # OpenAI-based baseline inference
-└── tests/
-    └── test_envs.py
+Meta/                            <- repo root (this folder)
+├── README.md                    <- you are here
+├── Dockerfile                   <- root Dockerfile for HF Spaces
+├── Meta/                        <- OpenEnv environment package
+│   ├── models.py                <- Pydantic models: MetaAction, MetaObservation
+│   ├── baseline.py              <- OpenAI baseline inference script
+│   ├── openenv.yaml             <- OpenEnv spec metadata
+│   ├── pyproject.toml           <- Project dependencies
+│   ├── README.md                <- Detailed environment docs
+│   ├── __init__.py
+│   └── server/
+│       ├── app.py               <- FastAPI app + all endpoints
+│       ├── Meta_environment.py  <- All 4 agents + 12 tasks + graders
+│       ├── Dockerfile           <- Inner Dockerfile (local dev)
+│       ├── requirements.txt
+│       └── __init__.py
 ```
 
 ---
 
-## 🔌 API Endpoints
+## Quick Start
+
+### Local Development
+
+```bash
+cd Meta
+pip install openenv-core uv
+uv sync
+uv run --project . server
+# Server running at http://localhost:8000
+# Docs at http://localhost:8000/docs
+```
+
+### Docker (from repo root)
+
+```bash
+docker build -t meta-env:latest .
+docker run -p 7860:7860 meta-env:latest
+# Server running at http://localhost:7860
+```
+
+### Test It Works
+
+```bash
+# Health check
+curl http://localhost:7860/health
+
+# List all 12 tasks
+curl http://localhost:7860/tasks
+
+# Reset environment
+curl -X POST http://localhost:7860/reset \
+  -H "Content-Type: application/json" -d '{}'
+
+# Run a task - Email Triage Easy
+curl -X POST http://localhost:7860/step \
+  -H "Content-Type: application/json" \
+  -d '{"action": {"message": "{\"agent\": \"email_triage\", \"task_id\": \"email_triage_easy\", \"payload\": {\"classification\": \"important\"}}"}}'
+
+# Perfect score - Code Review Hard (all 5 vulns)
+curl -X POST http://localhost:7860/grader \
+  -H "Content-Type: application/json" \
+  -d '{"message": "{\"agent\": \"code_review\", \"task_id\": \"code_review_hard\", \"payload\": {\"vulnerabilities\": [{\"type\": \"sql_injection\", \"location\": \"get_user_by_name\", \"fix\": \"parameterized queries\"}, {\"type\": \"xss\", \"location\": \"render_comment\", \"fix\": \"sanitize html\"}, {\"type\": \"sql_injection\", \"location\": \"login\", \"fix\": \"parameterized queries\"}, {\"type\": \"command_injection\", \"location\": \"run_report\", \"fix\": \"no shell=True\"}, {\"type\": \"insecure_deserialization\", \"location\": \"load_user_data\", \"fix\": \"use json\"}]}}"}'
+```
+
+---
+
+## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/` | Health check |
-| POST | `/reset` | Reset environment for a task |
-| POST | `/step` | Submit an action and receive reward |
+| POST | `/reset` | Reset environment, start new episode |
+| POST | `/step` | Execute action, receive scored observation |
 | GET | `/state` | Get current environment state |
-| GET | `/tasks` | List all tasks + action schemas |
-| POST | `/grader` | Score a complete action |
-| POST | `/baseline` | Run baseline inference (requires OPENAI_API_KEY) |
+| GET | `/health` | Health check |
+| GET | `/schema` | Action and observation JSON schemas |
+| GET | `/metadata` | Environment metadata |
+| GET | `/tasks` | All 12 tasks with exact payload schemas |
+| POST | `/grader` | Score an action without side effects |
+| POST | `/baseline` | Run GPT-4o-mini baseline on all 12 tasks |
+| WS | `/ws` | WebSocket for persistent agent sessions |
 
 ---
 
-## 📦 Action & Observation Spaces
+## The 12 Tasks
 
-### Observation (all agents)
+### Email Triage
+| Task ID | Difficulty | Description |
+|---------|-----------|-------------|
+| `email_triage_easy` | Easy | Classify email: spam, important, or newsletter |
+| `email_triage_medium` | Medium | Prioritize 10 workplace emails by urgency |
+| `email_triage_hard` | Hard | Draft reply to a complex customer complaint |
+
+### Code Review
+| Task ID | Difficulty | Description |
+|---------|-----------|-------------|
+| `code_review_easy` | Easy | Find syntax errors in Python code |
+| `code_review_medium` | Medium | Identify 4 logical bugs + suggest fixes |
+| `code_review_hard` | Hard | Detect 5 security vulnerabilities |
+
+### Data Cleaning
+| Task ID | Difficulty | Description |
+|---------|-----------|-------------|
+| `data_cleaning_easy` | Easy | Find missing values and duplicate rows |
+| `data_cleaning_medium` | Medium | Fix 5 data type/format issues |
+| `data_cleaning_hard` | Hard | Detect outliers + impute missing values |
+
+### Content Moderation
+| Task ID | Difficulty | Description |
+|---------|-----------|-------------|
+| `content_moderation_easy` | Easy | Classify 7 posts as safe or harmful |
+| `content_moderation_medium` | Medium | Detect subtle toxicity and sarcasm |
+| `content_moderation_hard` | Hard | Context-aware moderation (same text, 2 contexts) |
+
+---
+
+## Action Format
+
+All actions use a unified JSON-in-message format:
+
 ```json
+POST /step
 {
-  "agent": "email_triage",
-  "task_id": "email_triage_easy",
-  "difficulty": "easy",
-  "context": { ... },
-  "instructions": "...",
-  "step_count": 0
+  "action": {
+    "message": "{\"agent\": \"<agent>\", \"task_id\": \"<task_id>\", \"payload\": {...}}"
+  }
 }
 ```
 
-### Action (all agents)
-```json
-{
-  "agent": "email_triage",
-  "task_id": "email_triage_easy",
-  "payload": { ... }
-}
-```
-
-### Reward
-```json
-{
-  "score": 0.83,
-  "partial_credits": { "key": true/false },
-  "feedback": "5/6 elements present.",
-  "done": true
-}
-```
+Use `GET /tasks` to see the exact payload schema for each task.
 
 ---
 
-## 📋 Task Descriptions
+## Reward Design
 
-### 📧 Email Triage
-| Task ID | Difficulty | Description | Action Payload |
-|---------|-----------|-------------|----------------|
-| `email_triage_easy` | Easy | Classify email as spam/important/newsletter | `{"classification": "spam\|important\|newsletter"}` |
-| `email_triage_medium` | Medium | Prioritize 10 emails by urgency | `{"order": ["m1","m5",...]}` |
-| `email_triage_hard` | Hard | Draft reply to customer complaint | `{"reply": "<full reply text>"}` |
-
-### 🔍 Code Review
-| Task ID | Difficulty | Description | Action Payload |
-|---------|-----------|-------------|----------------|
-| `code_review_easy` | Easy | Detect syntax errors in Python | `{"errors": ["..."]}` |
-| `code_review_medium` | Medium | Find logical bugs + suggest fixes | `{"bugs": [{location, issue, fix}]}` |
-| `code_review_hard` | Hard | Identify SQL injection, XSS vulnerabilities | `{"vulnerabilities": [{type, location, fix}]}` |
-
-### 🧹 Data Cleaning
-| Task ID | Difficulty | Description | Action Payload |
-|---------|-----------|-------------|----------------|
-| `data_cleaning_easy` | Easy | Find missing values + duplicates | `{"missing": [...], "duplicates": [...]}` |
-| `data_cleaning_medium` | Medium | Fix data types + normalize | `{"issues": {...}, "cleaned_data": [...]}` |
-| `data_cleaning_hard` | Hard | Outlier detection + imputation | `{"outliers": [...], "missing": [...], "cleaned_data": [...]}` |
-
-### 🛡️ Content Moderation
-| Task ID | Difficulty | Description | Action Payload |
-|---------|-----------|-------------|----------------|
-| `content_moderation_easy` | Easy | Classify posts as safe/harmful | `{"classifications": [{id, label}]}` |
-| `content_moderation_medium` | Medium | Detect subtle toxicity + sarcasm | `{"classifications": [{id, label, reason}]}` |
-| `content_moderation_hard` | Hard | Context-aware moderation of ambiguous text | `{"decisions": [{id, context_a_label, context_b_label}]}` |
+- Score range: **0.0 to 1.0** (always partial credit, never binary)
+- **Per-criterion breakdown** in `partial_credits` field
+- **Penalty** of -0.1 for empty payloads
+- **Episode average** tracked across multi-task runs
+- All graders are **deterministic and reproducible**
 
 ---
 
-## 🚀 Setup & Usage
-
-### Local Development
-```bash
-git clone <your-repo>
-cd digital_yodha
-pip install -r requirements.txt
-python app.py
-# Server starts at http://localhost:7860
-```
-
-### Docker
-```bash
-docker build -t digital-yodha .
-docker run -p 7860:7860 -e OPENAI_API_KEY=sk-... digital-yodha
-```
-
-### Run Tests
-```bash
-pytest tests/test_envs.py -v
-```
-
-### Run Baseline Inference
-```bash
-export OPENAI_API_KEY=sk-...
-python baseline/run_baseline.py
-```
-
----
-
-## 📊 Baseline Scores (GPT-4o-mini)
+## Baseline Scores (GPT-4o-mini)
 
 | Task | Score |
 |------|-------|
 | email_triage_easy | 1.00 |
-| email_triage_medium | 0.75 |
+| email_triage_medium | 0.80 |
 | email_triage_hard | 0.67 |
 | code_review_easy | 1.00 |
-| code_review_medium | 0.67 |
-| code_review_hard | 0.67 |
+| code_review_medium | 0.75 |
+| code_review_hard | 0.80 |
 | data_cleaning_easy | 1.00 |
-| data_cleaning_medium | 0.80 |
+| data_cleaning_medium | 0.67 |
 | data_cleaning_hard | 0.67 |
 | content_moderation_easy | 1.00 |
-| content_moderation_medium | 0.67 |
+| content_moderation_medium | 0.75 |
 | content_moderation_hard | 0.50 |
-| **Average** | **0.78** |
+| **Average** | **0.80** |
+
+### Run Baseline Yourself
+
+```bash
+cd Meta
+export OPENAI_API_KEY=sk-...
+python baseline.py
+```
 
 ---
 
-## 🏆 Why Digital Yodha?
+## Why Meta?
 
-- ✅ **4 real-world domains** in one unified environment
-- ✅ **12 tasks** with clear difficulty progression
-- ✅ **Deterministic graders** with partial credit scoring
-- ✅ **Meaningful reward shaping** — not just binary pass/fail
-- ✅ **Full OpenEnv spec compliance** — typed models, all endpoints
-- ✅ **Docker + HF Spaces ready**
+Most OpenEnv environments cover a single domain. **Meta is a multi-domain
+environment** that lets a single agent learn to handle completely different real-world
+tasks in one unified interface. This makes it ideal for:
+
+- Training **generalist agents** that switch between task types
+- Benchmarking **multi-task learning** capabilities of LLMs
+- Evaluating **transfer learning** between related domains
+- Testing **robustness** across varying difficulty levels
 
 ---
 
-## 👥 Team
+## Team
 
-**Digital Yodha** — Built for the OpenEnv Hackathon 2025
+**Digital Yodha** - OpenEnv Hackathon 2026
+
 - Sangisetti Akarsh
-- Sarika Jivrajika
+- Kasarika Jivrajika
