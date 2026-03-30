@@ -32,11 +32,11 @@ except Exception as e:
     raise ImportError("openenv-core required. Run: pip install openenv-core") from e
 
 try:
-    from ..models import MetaAction, MetaObservation
-    from .Meta_environment import MetaEnvironment
-except ModuleNotFoundError:
     from models import MetaAction, MetaObservation
     from server.Meta_environment import MetaEnvironment
+except ImportError:
+    from ..models import MetaAction, MetaObservation
+    from .Meta_environment import MetaEnvironment
 
 from fastapi import Request
 from fastapi.responses import JSONResponse

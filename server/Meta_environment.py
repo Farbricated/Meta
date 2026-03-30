@@ -12,14 +12,6 @@ Four real-world AI agent domains, 12 tasks total (easy/medium/hard each):
   2. Code Review         - syntax errors, logic bugs, security vulnerabilities
   3. Data Cleaning       - missing values, type normalization, outlier imputation
   4. Content Moderation  - explicit, subtle toxicity, context-aware moderation
-
-v2 upgrades:
-  - message field wraps JSON payload (compatible with real OpenEnv create_app)
-  - Multi-variant easy tasks (random selection per episode for diversity)
-  - Richer graders with partial_credits breakdown per criterion
-  - Partial reward for near-correct answers (not just binary)
-  - Trajectory reward: penalizes empty/malformed payloads
-  - Better instructions with exact payload schema in each observation
 """
 
 import json
@@ -29,13 +21,13 @@ from openenv.core.env_server.interfaces import Environment
 from openenv.core.env_server.types import State
 
 try:
-    from ..models import MetaAction, MetaObservation
-except ImportError:
     from models import MetaAction, MetaObservation
+except ImportError:
+    from ..models import MetaAction, MetaObservation
 
 
 # ==============================================================================
-# TASK DATA - richer, more varied datasets
+# TASK DATA
 # ==============================================================================
 
 EMAIL_EASY_VARIANTS = [
@@ -97,7 +89,7 @@ EMAIL_HARD_CASES = [
             "offer_refund": ["refund", "money back", "full refund"],
             "offer_replacement": ["replacement", "replace", "new order", "send another", "overnight"],
             "provide_timeline": ["24 hours", "48 hours", "within", "today", "tomorrow", "business day"],
-            "professional_tone": None,  # checked via length + no rude phrases
+            "professional_tone": None,
             "compensation_acknowledged": ["compensat", "inconvenience", "make it right", "goodwill"],
         }
     },
@@ -239,11 +231,11 @@ DATA_MEDIUM = {
 DATA_HARD = {
     "data": [
         {"id": 1,  "value": 10.5},  {"id": 2,  "value": 11.2},
-        {"id": 3,  "value": 10.8},  {"id": 4,  "value": 999.0},   # outlier
-        {"id": 5,  "value": 10.1},  {"id": 6,  "value": None},    # missing
-        {"id": 7,  "value": 11.5},  {"id": 8,  "value": -500.0},  # outlier
+        {"id": 3,  "value": 10.8},  {"id": 4,  "value": 999.0},
+        {"id": 5,  "value": 10.1},  {"id": 6,  "value": None},
+        {"id": 7,  "value": 11.5},  {"id": 8,  "value": -500.0},
         {"id": 9,  "value": 10.9},  {"id": 10, "value": 11.0},
-        {"id": 11, "value": None},  {"id": 12, "value": 10.7},    # missing
+        {"id": 11, "value": None},  {"id": 12, "value": 10.7},
     ],
     "answers": {
         "outliers": {4, 8},
@@ -308,7 +300,7 @@ MOD_HARD = [
 
 
 # ==============================================================================
-# GRADERS v2 - partial credits, richer feedback
+# GRADERS
 # ==============================================================================
 
 def grade_email_easy(payload, context):
@@ -329,14 +321,9 @@ def grade_email_medium(payload, context):
     if not order:
         return 0.0, "[FAIL] No order provided.", {}
 
-    partial = {}
-    # Check top 2 critical (m1, m5)
     top2_ok = set(order[:2]) == {"m1", "m5"}
-    # Check top 5
     top5_ok = order[:5] == correct[:5]
-    # Full match
     full_ok = order == correct
-    # Position score
     hits = sum(1 for i, e in enumerate(order) if i < len(correct) and e == correct[i])
 
     partial = {"top2_critical": top2_ok, "top5_correct": top5_ok, "full_order": full_ok}
@@ -483,7 +470,6 @@ def grade_data_hard(payload):
     outlier_ok = outliers_given == correct_outliers
     missing_ok = missing_given  == correct_missing
 
-    # Check imputation for rows 6 and 11
     imputed_rows = {r["id"]: r.get("value") for r in cleaned if r.get("id") in correct_missing}
     imputed_ok = all(
         v is not None and lo <= float(v) <= hi
@@ -533,7 +519,7 @@ def grade_mod_hard(payload):
 
 
 # ==============================================================================
-# ENVIRONMENT
+# INSTRUCTIONS
 # ==============================================================================
 
 INSTRUCTIONS = {
@@ -588,28 +574,18 @@ INSTRUCTIONS = {
 }
 
 
-
+# ==============================================================================
+# ENVIRONMENT
+# ==============================================================================
 
 class MetaEnvironment(Environment):
-    """
-    Meta Multi-Agent Environment v2.
-
-    4 real-world agents x 3 tasks = 12 tasks total.
-    Actions are sent as JSON strings in the `message` field (OpenEnv compatible).
-
-    Quick start:
-        POST /reset  -> get episode_id
-        POST /step   -> body: {"action": {"message": "<json_string>"}}
-        GET  /tasks  -> see all tasks + payload schemas
-    """
-
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
 
     def __init__(self):
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self._current_task_id = None
-        self._current_agent_context = {}   # what agent sees (no labels/answers)
-        self._current_grader_context = {}  # full data including labels for grader
+        self._current_agent_context = {}
+        self._current_grader_context = {}
         self._episode_scores = []
 
     def reset(self) -> MetaObservation:
@@ -639,74 +615,56 @@ class MetaEnvironment(Environment):
         )
 
     def _load_context(self, task_id: str):
-        """
-        Returns (agent_context, grader_context, difficulty).
-        agent_context  = what the agent sees (no labels/answers hidden)
-        grader_context = full data with labels for internal grading only
-        """
         if task_id == "email_triage_easy":
             email = random.choice(EMAIL_EASY_VARIANTS)
             agent_ctx  = {"email": {k: v for k, v in email.items() if k != "label"}}
             grader_ctx = {"email": email}
             return agent_ctx, grader_ctx, "easy"
-
         elif task_id == "email_triage_medium":
             agent_ctx  = {"emails": [{k: v for k, v in e.items() if k not in ("priority","category")} for e in EMAIL_MEDIUM_EMAILS]}
             grader_ctx = {"emails": EMAIL_MEDIUM_EMAILS}
             return agent_ctx, grader_ctx, "medium"
-
         elif task_id == "email_triage_hard":
             case = random.choice(EMAIL_HARD_CASES)
             agent_ctx  = {"email": {k: v for k, v in case.items() if k != "expected_elements"}}
             grader_ctx = {"email": case}
             return agent_ctx, grader_ctx, "hard"
-
         elif task_id == "code_review_easy":
             variant = random.choice(CODE_EASY_VARIANTS)
             agent_ctx  = {"code": variant["code"]}
             grader_ctx = {"code": variant["code"], "keywords": variant["keywords"]}
             return agent_ctx, grader_ctx, "easy"
-
         elif task_id == "code_review_medium":
             ctx = {"code": CODE_MEDIUM["code"]}
             return ctx, ctx, "medium"
-
         elif task_id == "code_review_hard":
             ctx = {"code": CODE_HARD["code"]}
             return ctx, ctx, "hard"
-
         elif task_id == "data_cleaning_easy":
             ctx = {"data": DATA_EASY["data"]}
             return ctx, ctx, "easy"
-
         elif task_id == "data_cleaning_medium":
             ctx = {"data": DATA_MEDIUM["data"]}
             return ctx, ctx, "medium"
-
         elif task_id == "data_cleaning_hard":
             ctx = {"data": DATA_HARD["data"]}
             return ctx, ctx, "hard"
-
         elif task_id == "content_moderation_easy":
             agent_ctx  = {"posts": [{k: v for k, v in p.items() if k != "label"} for p in MOD_EASY]}
             grader_ctx = {"posts": MOD_EASY}
             return agent_ctx, grader_ctx, "easy"
-
         elif task_id == "content_moderation_medium":
             agent_ctx  = {"posts": [{k: v for k, v in p.items() if k != "label"} for p in MOD_MEDIUM]}
             grader_ctx = {"posts": MOD_MEDIUM}
             return agent_ctx, grader_ctx, "medium"
-
         elif task_id == "content_moderation_hard":
             agent_ctx  = {"cases": [{k: v for k, v in c.items() if k not in ("label_a","label_b","reason_a","reason_b")} for c in MOD_HARD]}
             grader_ctx = {"cases": MOD_HARD}
             return agent_ctx, grader_ctx, "hard"
-
         else:
             raise ValueError(f"Unknown task_id: '{task_id}'. Use GET /tasks to see valid IDs.")
 
     def _grade(self, task_id, payload, grader_context):
-        """Run grader using full grader_context (includes labels/answers)."""
         if task_id == "email_triage_easy":       return grade_email_easy(payload, grader_context)
         elif task_id == "email_triage_medium":   return grade_email_medium(payload, grader_context)
         elif task_id == "email_triage_hard":     return grade_email_hard(payload, grader_context)
@@ -724,7 +682,6 @@ class MetaEnvironment(Environment):
     def step(self, action: MetaAction) -> MetaObservation:  # type: ignore[override]
         self._state.step_count += 1
 
-        # Parse the JSON message
         try:
             data    = json.loads(action.message)
             agent   = data.get("agent", "")
@@ -739,9 +696,7 @@ class MetaEnvironment(Environment):
                 score=0.0, partial_credits={}, done=True, reward=0.0,
             )
 
-        # Penalize empty payload
         if not payload or payload == {"_probe": True}:
-            # Load context so agent can see what task looks like
             try:
                 agent_ctx, grader_ctx, difficulty = self._load_context(task_id)
                 self._current_agent_context  = agent_ctx
@@ -760,7 +715,6 @@ class MetaEnvironment(Environment):
                 score=0.0, partial_credits={}, done=is_probe, reward=-0.1 if not is_probe else 0.0,
             )
 
-        # Load context (fresh if task changed)
         try:
             if task_id != self._current_task_id:
                 agent_ctx, grader_ctx, difficulty = self._load_context(task_id)
@@ -780,7 +734,6 @@ class MetaEnvironment(Environment):
                 score=0.0, partial_credits={}, done=True, reward=0.0,
             )
 
-        # Grade using grader_context (has labels), show agent_context to agent
         score, feedback, partial_credits = self._grade(task_id, payload, grader_ctx)
         self._episode_scores.append(score)
 
