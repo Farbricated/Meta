@@ -19,7 +19,9 @@ Standard OpenEnv endpoints (from create_app):
 Custom Meta endpoints:
     GET  /tasks    - All 12 tasks with exact payload schemas
     POST /grader   - Score an action without side effects
-    POST /baseline - Run OpenAI baseline across all 12 tasks
+    POST /baseline - Run Groq/OpenAI baseline across all 12 tasks
+    GET  /ui       - Gradio interactive frontend
+    GET  /         - Redirects to /ui
 """
 
 import os
@@ -39,7 +41,7 @@ except ImportError:
     from .Meta_environment import MetaEnvironment
 
 from fastapi import Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 # ─── Create base OpenEnv app ──────────────────────────────────────────────────
 app = create_app(
@@ -50,7 +52,24 @@ app = create_app(
     max_concurrent_envs=20,
 )
 
-# ─── Task Registry ─────────────────────────────────────────────────────────────
+# ─── Mount Gradio UI at /ui ───────────────────────────────────────────────────
+try:
+    from server.gradio_ui import mount_gradio
+    mount_gradio(app)
+except ImportError:
+    try:
+        from .gradio_ui import mount_gradio
+        mount_gradio(app)
+    except ImportError as e:
+        print(f"[WARN] Gradio UI not mounted: {e}. Install gradio: pip install gradio")
+
+# ─── Root redirect ────────────────────────────────────────────────────────────
+@app.get("/")
+def root():
+    """Redirect root to the Gradio UI."""
+    return RedirectResponse(url="/ui")
+
+# ─── Task Registry ────────────────────────────────────────────────────────────
 TASK_REGISTRY = [
     {
         "id": "email_triage_easy",
@@ -127,7 +146,7 @@ TASK_REGISTRY = [
         "name": "Security Vulnerability Detection",
         "agent": "code_review",
         "difficulty": "hard",
-        "description": "Identify all 5 security vulnerabilities: SQL injection, XSS, command injection, insecure deserialization.",
+        "description": "Identify all 5 security vulnerabilities.",
         "action_schema": {
             "message": json.dumps({
                 "agent": "code_review",
@@ -155,7 +174,7 @@ TASK_REGISTRY = [
         "name": "Data Type Normalization",
         "agent": "data_cleaning",
         "difficulty": "medium",
-        "description": "Identify 5 data quality issues (types, formats, casing) and return cleaned dataset.",
+        "description": "Identify 5 data quality issues and return cleaned dataset.",
         "action_schema": {
             "message": json.dumps({
                 "agent": "data_cleaning",
@@ -169,7 +188,7 @@ TASK_REGISTRY = [
         "name": "Outlier Detection & Imputation",
         "agent": "data_cleaning",
         "difficulty": "hard",
-        "description": "Detect outliers (IQR/z-score), find missing values, impute and return clean dataset.",
+        "description": "Detect outliers, find missing values, impute and return clean dataset.",
         "action_schema": {
             "message": json.dumps({
                 "agent": "data_cleaning",
@@ -183,7 +202,7 @@ TASK_REGISTRY = [
         "name": "Explicit Content Detection",
         "agent": "content_moderation",
         "difficulty": "easy",
-        "description": "Classify 7 posts as safe or harmful (explicit hate speech, threats, insults).",
+        "description": "Classify 7 posts as safe or harmful.",
         "action_schema": {
             "message": json.dumps({
                 "agent": "content_moderation",
@@ -197,7 +216,7 @@ TASK_REGISTRY = [
         "name": "Subtle Toxicity Detection",
         "agent": "content_moderation",
         "difficulty": "medium",
-        "description": "Detect subtle toxicity, sarcasm-based insults, and implicit hostility across 8 posts.",
+        "description": "Detect subtle toxicity, sarcasm, and implicit hostility across 8 posts.",
         "action_schema": {
             "message": json.dumps({
                 "agent": "content_moderation",
@@ -211,7 +230,7 @@ TASK_REGISTRY = [
         "name": "Context-Aware Moderation",
         "agent": "content_moderation",
         "difficulty": "hard",
-        "description": "Same text, two different contexts — determine the correct label for each context across 3 cases.",
+        "description": "Same text, two different contexts — determine the correct label for each.",
         "action_schema": {
             "message": json.dumps({
                 "agent": "content_moderation",
@@ -240,56 +259,75 @@ def list_tasks():
 
 @app.post("/grader")
 async def grader(request: Request):
-    """
-    Score an action without persistent side effects.
-    Body: {"message": "<json_string>"} or {"action": {"message": "<json_string>"}}
-    """
-    body = await request.json()
-    msg = body.get("message") or body.get("action", {}).get("message", "{}")
-    env = MetaEnvironment()
+    """Score an action without persistent side effects."""
+    body   = await request.json()
+    msg    = body.get("message") or body.get("action", {}).get("message", "{}")
+    env    = MetaEnvironment()
     env.reset()
     action = MetaAction(message=msg)
-    obs = env.step(action)
+    obs    = env.step(action)
     return {
-        "task_id": obs.task_id,
-        "agent": obs.agent,
-        "score": obs.score,
-        "reward": obs.reward,
-        "feedback": obs.feedback,
+        "task_id":         obs.task_id,
+        "agent":           obs.agent,
+        "score":           obs.score,
+        "reward":          obs.reward,
+        "feedback":        obs.feedback,
         "partial_credits": obs.partial_credits,
-        "difficulty": obs.difficulty,
+        "difficulty":      obs.difficulty,
     }
 
 
 @app.post("/baseline")
 async def baseline():
     """
-    Run OpenAI GPT-4o-mini baseline across all 12 tasks.
-    Requires OPENAI_API_KEY environment variable.
+    Run baseline LLM across all 12 tasks.
+    Reads API key from: OPENAI_API_KEY → GROQ_API_KEY → HF_TOKEN (in that order).
+    Reads base URL from: API_BASE_URL (default: https://api.groq.com/openai/v1)
+    Reads model from:    MODEL_NAME   (default: llama-3.3-70b-versatile)
     """
-    api_key = os.environ.get("OPENAI_API_KEY")
+    # Accept any of the three key env vars
+    api_key = (
+        os.environ.get("OPENAI_API_KEY")
+        or os.environ.get("GROQ_API_KEY")
+        or os.environ.get("HF_TOKEN")
+    )
     if not api_key:
         return JSONResponse(
             status_code=400,
-            content={"error": "OPENAI_API_KEY environment variable not set."}
+            content={
+                "error": (
+                    "No API key found. Set one of: "
+                    "OPENAI_API_KEY, GROQ_API_KEY, or HF_TOKEN. "
+                    "Get a free Groq key at https://console.groq.com"
+                )
+            }
         )
+
+    api_base_url = os.environ.get("API_BASE_URL", "https://api.groq.com/openai/v1")
+    model_name   = os.environ.get("MODEL_NAME",   "llama-3.3-70b-versatile")
+
     try:
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from baseline import run_all_baselines
-        scores = run_all_baselines(api_key)
+        scores = run_all_baselines(
+            api_key=api_key,
+            api_base_url=api_base_url,
+            model_name=model_name,
+        )
         avg = round(sum(s["score"] for s in scores) / len(scores), 3)
         return {
-            "environment": "Meta Multi-Agent v2",
-            "model": "gpt-4o-mini",
-            "average_score": avg,
-            "total_tasks": len(scores),
+            "environment":     "Meta Multi-Agent v2",
+            "model":           model_name,
+            "api_base":        api_base_url,
+            "average_score":   avg,
+            "total_tasks":     len(scores),
             "baseline_scores": scores,
         }
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
-def main(host: str = "0.0.0.0", port: int = 8000):
+def main(host: str = "0.0.0.0", port: int = 7860):
     import uvicorn
     uvicorn.run(app, host=host, port=port)
 
@@ -297,6 +335,6 @@ def main(host: str = "0.0.0.0", port: int = 8000):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=7860)
     args = parser.parse_args()
     main(port=args.port)

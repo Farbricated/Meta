@@ -1,9 +1,15 @@
 """
 Meta v2 — Baseline Inference Script
-Runs GPT-4o-mini against all 12 tasks and reports scores.
+Runs llama-3.3-70b-versatile (via Groq) against all 12 tasks and reports scores.
 
 Usage:
-    export OPENAI_API_KEY=sk-...
+    # Option 1 — use .env file (recommended)
+    python baseline.py
+
+    # Option 2 — set env vars manually
+    export API_BASE_URL=https://api.groq.com/openai/v1
+    export MODEL_NAME=llama-3.3-70b-versatile
+    export HF_TOKEN=gsk_...
     python baseline.py
 """
 
@@ -13,6 +19,16 @@ import json
 import re
 
 sys.path.insert(0, os.path.dirname(__file__))
+
+# Load .env if present
+_env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.exists(_env_file):
+    with open(_env_file) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _, _v = _line.partition("=")
+                os.environ.setdefault(_k.strip(), _v.strip())
 
 TASK_IDS = [
     "email_triage_easy", "email_triage_medium", "email_triage_hard",
@@ -30,20 +46,17 @@ SYSTEM_PROMPT = (
 
 
 def extract_json(text: str) -> dict:
-    """Robustly extract JSON from model response."""
     text = text.strip()
     try:
         return json.loads(text)
     except Exception:
         pass
-    # Strip markdown fences
     match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if match:
         try:
             return json.loads(match.group(1))
         except Exception:
             pass
-    # Find first { ... }
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
         try:
@@ -53,88 +66,109 @@ def extract_json(text: str) -> dict:
     return {}
 
 
-def run_task(client, task_id: str) -> dict:
+def run_task(client, task_id: str, model_name: str) -> dict:
     from server.Meta_environment import MetaEnvironment, INSTRUCTIONS
     from models import MetaAction
 
-    # Load context via a probe step
     env = MetaEnvironment()
     env.reset()
-    probe_msg = json.dumps({"agent": "_".join(task_id.split("_")[:-1]), "task_id": task_id, "payload": {"_probe": True}})
-    probe_obs = env.step(MetaAction(message=probe_msg))
-
+    probe_msg = json.dumps({
+        "agent":   "_".join(task_id.split("_")[:-1]),
+        "task_id": task_id,
+        "payload": {"_probe": True},
+    })
+    probe_obs    = env.step(MetaAction(message=probe_msg))
     instructions = INSTRUCTIONS.get(task_id, probe_obs.instructions)
-    context = probe_obs.context
+    context      = probe_obs.context
 
     user_prompt = (
         f"Task ID: {task_id}\n"
         f"Difficulty: {probe_obs.difficulty}\n\n"
         f"Instructions:\n{instructions}\n\n"
         f"Context:\n{json.dumps(context, indent=2)}\n\n"
-        "Respond with ONLY the payload JSON object (the value of the 'payload' key)."
+        "Respond with ONLY the payload JSON object."
     )
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=model_name,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
+                {"role": "user",   "content": user_prompt},
             ],
             temperature=0.0,
             max_tokens=2000,
         )
-        raw = response.choices[0].message.content
+        raw     = response.choices[0].message.content
         payload = extract_json(raw)
     except Exception as e:
         payload = {}
-        raw = str(e)
+        raw     = str(e)
 
-    # Grade with real action
+    # Grade
     agent = "_".join(task_id.split("_")[:-1])
-    env2 = MetaEnvironment()
+    env2  = MetaEnvironment()
     env2.reset()
-    # Re-set context
-    env2._current_context = context
-    env2._current_task_id = task_id
+    env2._current_agent_context  = context
+    env2._current_grader_context = context
+    env2._current_task_id        = task_id
 
     action_msg = json.dumps({"agent": agent, "task_id": task_id, "payload": payload})
     result_obs = env2.step(MetaAction(message=action_msg))
 
     return {
-        "task_id": task_id,
-        "agent": agent,
-        "difficulty": result_obs.difficulty,
-        "score": result_obs.score,
-        "feedback": result_obs.feedback,
+        "task_id":         task_id,
+        "agent":           agent,
+        "difficulty":      result_obs.difficulty,
+        "score":           result_obs.score,
+        "feedback":        result_obs.feedback,
         "partial_credits": result_obs.partial_credits,
-        "reward": result_obs.reward,
+        "reward":          result_obs.reward,
     }
 
 
-def run_all_baselines(api_key: str = None) -> list:
+def run_all_baselines(api_key: str = None, api_base_url: str = None, model_name: str = None) -> list:
     from openai import OpenAI
+    import time
 
-    api_key = api_key or os.environ.get("OPENAI_API_KEY")
+    # Key resolution: explicit arg → OPENAI_API_KEY → GROQ_API_KEY → HF_TOKEN
+    api_key = (
+        api_key
+        or os.environ.get("OPENAI_API_KEY")
+        or os.environ.get("GROQ_API_KEY")
+        or os.environ.get("HF_TOKEN")
+    )
     if not api_key:
-        raise EnvironmentError("OPENAI_API_KEY not set.")
+        raise EnvironmentError(
+            "No API key found. Set HF_TOKEN, GROQ_API_KEY, or OPENAI_API_KEY.\n"
+            "Get a free Groq key at https://console.groq.com"
+        )
 
-    client = OpenAI(api_key=api_key)
+    api_base_url = api_base_url or os.environ.get("API_BASE_URL", "https://api.groq.com/openai/v1")
+    model_name   = model_name   or os.environ.get("MODEL_NAME",   "llama-3.3-70b-versatile")
+
+    # Groq is OpenAI-compatible — same SDK, different base_url
+    client  = OpenAI(api_key=api_key, base_url=api_base_url)
     results = []
 
     print("\n🚀 Meta Multi-Agent v2 — Baseline Inference")
-    print("=" * 60)
+    print(f"   Model    : {model_name}")
+    print(f"   API Base : {api_base_url}")
+    print("=" * 65)
+
     for task_id in TASK_IDS:
         print(f"  ▶ {task_id:<35}", end=" ", flush=True)
-        result = run_task(client, task_id)
+        result = run_task(client, task_id, model_name)
         results.append(result)
         bar = "█" * int(result["score"] * 10) + "░" * (10 - int(result["score"] * 10))
-        print(f"[{bar}] {result['score']:.2f}  {result['feedback']}")
+        print(f"[{bar}] {result['score']:.2f}  {result['feedback'][:50]}")
+        # Respect Groq free tier rate limit (30 req/min)
+        time.sleep(2)
 
     avg = sum(r["score"] for r in results) / len(results)
-    print("=" * 60)
+    print("=" * 65)
     print(f"  📊 Average Score: {avg:.3f}  |  Tasks: {len(results)}")
-    print("=" * 60)
+    print("=" * 65)
     return results
 
 

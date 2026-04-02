@@ -1,6 +1,125 @@
 spec_version: 1
 name: Meta
+description: >
+  Meta is the first multi-domain OpenEnv environment featuring 4 AI agents
+  (Email Triage, Code Review, Data Cleaning, Content Moderation) across 12
+  real-world tasks (easy/medium/hard). Built for multi-task learning,
+  transfer learning, and generalist agent research.
+version: "2.0.0"
 type: space
 runtime: fastapi
 app: server.app:app
-port: 8000
+port: 7860
+
+tags:
+  - openenv
+  - multi-agent
+  - rl
+  - workplace
+  - benchmark
+  - email-triage
+  - code-review
+  - data-cleaning
+  - content-moderation
+
+tasks:
+  - id: email_triage_easy
+    agent: email_triage
+    difficulty: easy
+    description: Classify a single email as spam, important, or newsletter.
+
+  - id: email_triage_medium
+    agent: email_triage
+    difficulty: medium
+    description: Prioritize 10 workplace emails by urgency (most to least urgent).
+
+  - id: email_triage_hard
+    agent: email_triage
+    difficulty: hard
+    description: Draft a professional, empathetic reply to a complex customer complaint.
+
+  - id: code_review_easy
+    agent: code_review
+    difficulty: easy
+    description: Identify the syntax error(s) in a Python code snippet.
+
+  - id: code_review_medium
+    agent: code_review
+    difficulty: medium
+    description: Find all 4 logical bugs in the provided code and suggest fixes.
+
+  - id: code_review_hard
+    agent: code_review
+    difficulty: hard
+    description: >
+      Detect all 5 security vulnerabilities: SQL injection (x2), XSS,
+      command injection, insecure deserialization.
+
+  - id: data_cleaning_easy
+    agent: data_cleaning
+    difficulty: easy
+    description: Identify all missing values by field+row and detect duplicate rows.
+
+  - id: data_cleaning_medium
+    agent: data_cleaning
+    difficulty: medium
+    description: Fix 5 data type/format issues and return the cleaned dataset.
+
+  - id: data_cleaning_hard
+    agent: data_cleaning
+    difficulty: hard
+    description: >
+      Detect outliers via IQR/z-score, identify missing values, impute them,
+      and return the cleaned dataset.
+
+  - id: content_moderation_easy
+    agent: content_moderation
+    difficulty: easy
+    description: Classify 7 posts as safe or harmful (explicit content).
+
+  - id: content_moderation_medium
+    agent: content_moderation
+    difficulty: medium
+    description: Detect subtle toxicity, sarcasm, and implicit hostility across 8 posts.
+
+  - id: content_moderation_hard
+    agent: content_moderation
+    difficulty: hard
+    description: >
+      Context-aware moderation: same text in two different contexts —
+      determine the correct label for each context across 3 cases.
+
+agents:
+  - id: email_triage
+    tasks: [email_triage_easy, email_triage_medium, email_triage_hard]
+
+  - id: code_review
+    tasks: [code_review_easy, code_review_medium, code_review_hard]
+
+  - id: data_cleaning
+    tasks: [data_cleaning_easy, data_cleaning_medium, data_cleaning_hard]
+
+  - id: content_moderation
+    tasks: [content_moderation_easy, content_moderation_medium, content_moderation_hard]
+
+reward:
+  range: [0.0, 1.0]
+  partial_credit: true
+  deterministic: true
+
+baseline:
+  model: gpt-4o-mini
+  average_score: 0.80
+  scores:
+    email_triage_easy: 1.00
+    email_triage_medium: 0.80
+    email_triage_hard: 0.67
+    code_review_easy: 1.00
+    code_review_medium: 0.75
+    code_review_hard: 0.80
+    data_cleaning_easy: 1.00
+    data_cleaning_medium: 0.67
+    data_cleaning_hard: 0.67
+    content_moderation_easy: 1.00
+    content_moderation_medium: 0.75
+    content_moderation_hard: 0.50

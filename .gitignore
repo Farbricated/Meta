@@ -15,7 +15,7 @@ build/
 venv/
 env/
 
-# Environment variables
+# Environment variables — NEVER commit your API keys
 .env
 .env.local
 

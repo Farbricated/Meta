@@ -7,29 +7,31 @@ sdk: docker
 pinned: false
 tags:
   - openenv
+  - multi-agent
+  - rl
+  - workplace
+  - benchmark
 ---
 
-# Meta Multi-Agent OpenEnv
+# Meta — Multi-Domain AI Agent Benchmark
 
-> A unified OpenEnv environment featuring **4 specialized AI agents** across **12 real-world tasks**.
-> Built for the OpenEnv Hackathon 2026 by Team Digital Yodha.
+> **Meta is the first multi-domain OpenEnv environment** — a single unified benchmark where AI agents
+> learn email triage, code review, data cleaning, and content moderation all in one interface.
+> No existing single-domain environment lets researchers test generalist agents across these four
+> completely different real-world task types simultaneously, making Meta uniquely positioned for
+> multi-task learning, transfer learning, and generalist agent research.
+
+Built for the **OpenEnv Hackathon 2026** by Team **Digital Yodha**.
 
 ---
 
-## What Is This?
+## Why Meta Fills a Critical Gap
 
-**Meta** is a multi-domain reinforcement learning environment where AI agents learn to perform
-real-world workplace tasks across four distinct domains:
-
-| Agent | Domain | Real-World Use Case |
-|-------|--------|-------------------|
-| Email Triage | Workplace communication | Classify, prioritize, and respond to emails |
-| Code Review | Software engineering | Detect syntax errors, logic bugs, security vulnerabilities |
-| Data Cleaning | Data engineering | Find missing values, fix types, detect outliers |
-| Content Moderation | Trust & Safety | Detect explicit, subtle, and context-dependent harmful content |
-
-Each agent has **3 tasks** (easy, medium, hard) with deterministic graders that score
-agent performance from 0.0 to 1.0 with partial credit.
+Existing RL environments specialize: text environments don't benchmark code reasoning, and code
+environments don't test social judgment. Real-world agents — the kind that will actually automate
+knowledge work — need to switch fluidly between these domains. Meta provides the first unified
+interface to train and benchmark them, spanning four task families with a consistent action/observation
+API, partial-credit graders, and three difficulty levels per agent.
 
 ---
 
@@ -37,7 +39,7 @@ agent performance from 0.0 to 1.0 with partial credit.
 
 ### Action Space
 
-All actions use a unified JSON-in-message format compatible with the OpenEnv spec:
+All 4 agents share a unified JSON-in-message format compatible with the OpenEnv spec:
 
 ```json
 POST /step
@@ -69,23 +71,23 @@ POST /step
 
 ### Reward Function
 
-- Score range: **0.0 to 1.0** (never binary — always partial credit)
-- **Partial credits** per criterion (e.g. 3/5 bugs found = 0.6)
-- **Penalty** of -0.1 for empty/malformed payloads
-- **Episode average** tracked in metadata across multi-task runs
-- Graders are deterministic and reproducible
+- Score range: **0.0 to 1.0** — always partial credit, never binary
+- Partial credits per criterion (e.g. 3 of 5 bugs found = 0.60)
+- Penalty of `-0.1` for empty or malformed payloads
+- Episode average score tracked in `metadata` across multi-task runs
+- All graders are deterministic and reproducible
 
 ---
 
-## Task Descriptions
+## Agents & Tasks
 
-### Email Triage Agent
+### 1. Email Triage Agent
 
 | Task | Difficulty | Description |
 |------|-----------|-------------|
-| `email_triage_easy` | Easy | Classify a single email: spam, important, or newsletter |
-| `email_triage_medium` | Medium | Prioritize 10 workplace emails by urgency |
-| `email_triage_hard` | Hard | Draft a professional reply to a complex customer complaint |
+| `email_triage_easy` | 🟢 Easy | Classify a single email: spam, important, or newsletter |
+| `email_triage_medium` | 🟡 Medium | Prioritize 10 workplace emails by urgency |
+| `email_triage_hard` | 🔴 Hard | Draft a professional reply to a complex customer complaint |
 
 **Easy payload:**
 ```json
@@ -104,13 +106,13 @@ POST /step
 
 ---
 
-### Code Review Agent
+### 2. Code Review Agent
 
 | Task | Difficulty | Description |
 |------|-----------|-------------|
-| `code_review_easy` | Easy | Find syntax errors in a Python function |
-| `code_review_medium` | Medium | Identify 4 logical bugs and suggest fixes |
-| `code_review_hard` | Hard | Detect 5 security vulnerabilities (SQL injection, XSS, command injection, insecure deserialization) |
+| `code_review_easy` | 🟢 Easy | Find syntax errors in a Python function |
+| `code_review_medium` | 🟡 Medium | Identify 4 logical bugs and suggest fixes |
+| `code_review_hard` | 🔴 Hard | Detect 5 security vulnerabilities (SQL injection, XSS, command injection, insecure deserialization) |
 
 **Hard payload:**
 ```json
@@ -127,13 +129,13 @@ POST /step
 
 ---
 
-### Data Cleaning Agent
+### 3. Data Cleaning Agent
 
 | Task | Difficulty | Description |
 |------|-----------|-------------|
-| `data_cleaning_easy` | Easy | Identify missing values and duplicate rows |
-| `data_cleaning_medium` | Medium | Fix 5 data type/format issues and return cleaned dataset |
-| `data_cleaning_hard` | Hard | Detect outliers via IQR, impute missing values, return clean dataset |
+| `data_cleaning_easy` | 🟢 Easy | Identify missing values and duplicate rows |
+| `data_cleaning_medium` | 🟡 Medium | Fix 5 data type/format issues and return cleaned dataset |
+| `data_cleaning_hard` | 🔴 Hard | Detect outliers via IQR, impute missing values, return clean dataset |
 
 **Easy payload:**
 ```json
@@ -145,13 +147,13 @@ POST /step
 
 ---
 
-### Content Moderation Agent
+### 4. Content Moderation Agent
 
 | Task | Difficulty | Description |
 |------|-----------|-------------|
-| `content_moderation_easy` | Easy | Classify 7 posts as safe or harmful (explicit content) |
-| `content_moderation_medium` | Medium | Detect subtle toxicity, sarcasm, implicit hostility across 8 posts |
-| `content_moderation_hard` | Hard | Context-aware moderation: same text, 2 different contexts, 3 cases |
+| `content_moderation_easy` | 🟢 Easy | Classify 7 posts as safe or harmful (explicit content) |
+| `content_moderation_medium` | 🟡 Medium | Detect subtle toxicity, sarcasm, implicit hostility across 8 posts |
+| `content_moderation_hard` | 🔴 Hard | Context-aware moderation: same text, 2 different contexts, 3 cases |
 
 **Hard payload:**
 ```json
@@ -180,6 +182,7 @@ POST /step
 | POST | `/grader` | Score an action without side effects |
 | POST | `/baseline` | Run GPT-4o-mini baseline on all 12 tasks |
 | WS | `/ws` | WebSocket for persistent agent sessions |
+| GET | `/ui` | Gradio interactive frontend |
 
 ---
 
@@ -190,24 +193,34 @@ POST /step
 ```bash
 git clone https://huggingface.co/spaces/Flake56/meta-openenv
 cd meta-openenv
-pip install openenv-core openai fastapi uvicorn pydantic
+pip install openenv-core openai fastapi uvicorn pydantic gradio
 uvicorn server.app:app --host 0.0.0.0 --port 7860
+# Open http://localhost:7860/ui for the Gradio interface
 ```
 
 ### Docker
 
 ```bash
-# Build from repo root
 docker build -t meta-env:latest .
-
-# Run
 docker run -p 7860:7860 meta-env:latest
-
-# With OpenAI key for baseline
-docker run -p 7860:7860 -e OPENAI_API_KEY=sk-... meta-env:latest
 ```
 
-### Test All Endpoints
+### inference.py (Hackathon Validator)
+
+```bash
+export API_BASE_URL=https://api.openai.com/v1
+export MODEL_NAME=gpt-4o-mini
+export HF_TOKEN=hf_...
+python inference.py
+```
+
+### Run Tests
+
+```bash
+pytest tests/ -v
+```
+
+### Test Key Endpoints
 
 ```bash
 # Health
@@ -216,20 +229,10 @@ curl https://Flake56-meta-openenv.hf.space/health
 # List all tasks
 curl https://Flake56-meta-openenv.hf.space/tasks
 
-# Reset
-curl -X POST https://Flake56-meta-openenv.hf.space/reset -H "Content-Type: application/json" -d '{}'
-
-# Step - Email triage easy
+# Step — Email triage easy
 curl -X POST https://Flake56-meta-openenv.hf.space/step \
   -H "Content-Type: application/json" \
   -d '{"action": {"message": "{\"agent\": \"email_triage\", \"task_id\": \"email_triage_easy\", \"payload\": {\"classification\": \"spam\"}}"}}'
-```
-
-### Run Baseline
-
-```bash
-export OPENAI_API_KEY=sk-...
-python baseline.py
 ```
 
 ---
@@ -238,18 +241,18 @@ python baseline.py
 
 | Task | Difficulty | Score |
 |------|-----------|-------|
-| email_triage_easy | Easy | 1.00 |
-| email_triage_medium | Medium | 0.80 |
-| email_triage_hard | Hard | 0.67 |
-| code_review_easy | Easy | 1.00 |
-| code_review_medium | Medium | 0.75 |
-| code_review_hard | Hard | 0.80 |
-| data_cleaning_easy | Easy | 1.00 |
-| data_cleaning_medium | Medium | 0.67 |
-| data_cleaning_hard | Hard | 0.67 |
-| content_moderation_easy | Easy | 1.00 |
-| content_moderation_medium | Medium | 0.75 |
-| content_moderation_hard | Hard | 0.50 |
+| email_triage_easy | 🟢 Easy | 1.00 |
+| email_triage_medium | 🟡 Medium | 0.80 |
+| email_triage_hard | 🔴 Hard | 0.67 |
+| code_review_easy | 🟢 Easy | 1.00 |
+| code_review_medium | 🟡 Medium | 0.75 |
+| code_review_hard | 🔴 Hard | 0.80 |
+| data_cleaning_easy | 🟢 Easy | 1.00 |
+| data_cleaning_medium | 🟡 Medium | 0.67 |
+| data_cleaning_hard | 🔴 Hard | 0.67 |
+| content_moderation_easy | 🟢 Easy | 1.00 |
+| content_moderation_medium | 🟡 Medium | 0.75 |
+| content_moderation_hard | 🔴 Hard | 0.50 |
 | **Average** | | **0.80** |
 
 ---
@@ -258,15 +261,20 @@ python baseline.py
 
 ```
 meta-openenv/
-├── Dockerfile                   # Container for HF Spaces
+├── Dockerfile                   # Container for HF Spaces (port 7860)
 ├── README.md                    # This file
+├── inference.py                 # Hackathon validator script (API_BASE_URL, MODEL_NAME, HF_TOKEN)
 ├── baseline.py                  # OpenAI baseline inference script
 ├── models.py                    # Pydantic models: MetaAction, MetaObservation
-├── openenv.yaml                 # OpenEnv spec metadata
+├── openenv.yaml                 # OpenEnv spec — all 12 task IDs, port 7860
 ├── pyproject.toml               # Project dependencies
+├── .dockerignore                # Excludes .venv — keeps build under 1MB
 ├── __init__.py
+├── tests/
+│   └── test_environment.py      # pytest suite: reset, step, grader determinism
 └── server/
-    ├── app.py                   # FastAPI app with all endpoints
+    ├── app.py                   # FastAPI app — all endpoints + Gradio mount at /ui
+    ├── gradio_ui.py             # Gradio frontend: Task Explorer, Baseline Runner, Dashboard
     ├── Meta_environment.py      # All 4 agents + 12 tasks + graders
     ├── requirements.txt
     └── __init__.py
@@ -274,16 +282,13 @@ meta-openenv/
 
 ---
 
-## Why Meta?
+## Novelty
 
-Most OpenEnv environments cover a single domain. **Meta is the first multi-domain
-environment** that lets a single agent learn to handle completely different real-world
-tasks in one unified interface. This makes it ideal for:
-
-- Training **generalist agents** that can switch between task types
-- Benchmarking **multi-task learning** capabilities of LLMs
-- Evaluating **transfer learning** between related domains (e.g. email triage → content moderation)
-- Testing **robustness** of agents across varying difficulty levels
+**Meta is the first multi-domain OpenEnv environment.** A single agent can step through email
+classification, security vulnerability detection, statistical outlier analysis, and context-aware
+content moderation — all within one standardized OpenEnv interface. This enables research that
+is simply not possible with single-domain environments: multi-task curricula, cross-domain transfer
+experiments, and benchmarks for genuinely generalist AI agents.
 
 ---
 

@@ -1,9 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
-
 """
 Meta Multi-Agent Environment v2.
 
@@ -25,10 +19,6 @@ try:
 except ImportError:
     from ..models import MetaAction, MetaObservation
 
-
-# ==============================================================================
-# TASK DATA
-# ==============================================================================
 
 EMAIL_EASY_VARIANTS = [
     {"id": "e1", "subject": "You won $1,000,000!!!", "sender": "promo@totally-legit-lottery.com",
@@ -58,7 +48,7 @@ EMAIL_MEDIUM_EMAILS = [
      "body": "Unauthorized login attempt from IP 45.33.32.156. Verify immediately.", "priority": 1, "category": "critical"},
     {"id": "m6", "subject": "Invoice #INV-4521 overdue", "sender": "billing@vendor.com",
      "body": "Invoice of $5,400 was due 3 days ago. Payment needed to avoid service suspension.", "priority": 3, "category": "finance"},
-    {"id": "m7", "subject": "Happy Work Anniversary! ", "sender": "hr@company.com",
+    {"id": "m7", "subject": "Happy Work Anniversary!", "sender": "hr@company.com",
      "body": "Celebrating your 3 years with us!", "priority": 10, "category": "social"},
     {"id": "m8", "subject": "Q4 product launch deck - review needed", "sender": "marketing@company.com",
      "body": "Please review launch slides before Thursday. Launch is next Monday.", "priority": 3, "category": "business"},
@@ -222,7 +212,7 @@ DATA_MEDIUM = {
     "issues": {
         "age": "mixed types: strings 'thirty', '28', 'twenty-two' should be integers",
         "salary": "inconsistent formats: '$60,000' and '80,000' have symbols/commas",
-        "join_date": "three different date formats: YYYY/MM/DD, DD-MM-YYYY, YYYY-MM-DD, MM/DD/YYYY",
+        "join_date": "three different date formats",
         "name": "inconsistent casing: 'dave' lowercase, 'EVE' all caps",
         "active": "mixed types: True/False booleans mixed with strings 'yes'/'no'/'TRUE'",
     }
@@ -246,7 +236,7 @@ DATA_HARD = {
 
 MOD_EASY = [
     {"id": "c1", "text": "I hate you so much, I want to hurt you!",              "label": "harmful"},
-    {"id": "c2", "text": "Great weather today! Loving this sunshine ",          "label": "safe"},
+    {"id": "c2", "text": "Great weather today! Loving this sunshine",            "label": "safe"},
     {"id": "c3", "text": "All people from that group should be eliminated.",      "label": "harmful"},
     {"id": "c4", "text": "Can someone recommend a good Python beginner book?",   "label": "safe"},
     {"id": "c5", "text": "You're an absolute idiot and nobody likes you.",       "label": "harmful"},
@@ -259,7 +249,7 @@ MOD_MEDIUM = [
     {"id": "m2", "text": "I'm so done with these people. Absolutely insufferable.",          "label": "harmful"},
     {"id": "m3", "text": "That presentation was... very unique.",                            "label": "safe"},
     {"id": "m4", "text": "Some people just shouldn't be allowed to have opinions.",         "label": "harmful"},
-    {"id": "m5", "text": "Oh wow, another 'brilliant' idea from upper management ",       "label": "harmful"},
+    {"id": "m5", "text": "Oh wow, another 'brilliant' idea from upper management",          "label": "harmful"},
     {"id": "m6", "text": "Congrats on the promotion! Well deserved!",                       "label": "safe"},
     {"id": "m7", "text": "Not everyone is cut out for this kind of work, clearly.",         "label": "harmful"},
     {"id": "m8", "text": "Thanks for the feedback, I'll take it into account.",             "label": "safe"},
@@ -298,10 +288,6 @@ MOD_HARD = [
     },
 ]
 
-
-# ==============================================================================
-# GRADERS
-# ==============================================================================
 
 def grade_email_easy(payload, context):
     correct = context["email"]["label"]
@@ -518,10 +504,6 @@ def grade_mod_hard(payload):
     return score, feedback, checks
 
 
-# ==============================================================================
-# INSTRUCTIONS
-# ==============================================================================
-
 INSTRUCTIONS = {
     "email_triage_easy": (
         "Classify the email as exactly one of: 'spam', 'important', or 'newsletter'.\n"
@@ -573,10 +555,6 @@ INSTRUCTIONS = {
     ),
 }
 
-
-# ==============================================================================
-# ENVIRONMENT
-# ==============================================================================
 
 class MetaEnvironment(Environment):
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
@@ -679,7 +657,7 @@ class MetaEnvironment(Environment):
         elif task_id == "content_moderation_hard":   return grade_mod_hard(payload)
         return 0.0, "Unknown task.", {}
 
-    def step(self, action: MetaAction) -> MetaObservation:  # type: ignore[override]
+    def step(self, action: MetaAction) -> MetaObservation:
         self._state.step_count += 1
 
         try:
