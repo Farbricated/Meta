@@ -1,10 +1,5 @@
 """
 inference.py — Meta OpenEnv Hackathon Submission
-Runs inference against all 12 tasks of the Meta environment.
-
-Usage:
-    # Copy .env.example to .env and fill in your Groq key, then:
-    python inference.py
 """
 
 import os
@@ -13,112 +8,109 @@ import json
 import re
 import time
 
-# ── Env vars (MANDATORY — checked by automated validators) ───────────────────
-API_BASE_URL = os.environ.get("API_BASE_URL", "https://api.groq.com/openai/v1")
-MODEL_NAME   = os.environ.get("MODEL_NAME",   "llama-3.3-70b-versatile")
+# ── Load .env ─────────────────────────────────────────────────────────────────
+_env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.exists(_env_file):
+    with open(_env_file) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _, _v = _line.partition("=")
+                os.environ.setdefault(_k.strip(), _v.strip())
+
+# ── Mandatory env vars ────────────────────────────────────────────────────────
+API_BASE_URL = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME   = os.environ.get("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
 HF_TOKEN     = os.environ.get("HF_TOKEN",     "")
 
 TASK_IDS = [
-    "email_triage_easy",
-    "email_triage_medium",
-    "email_triage_hard",
-    "code_review_easy",
-    "code_review_medium",
-    "code_review_hard",
-    "data_cleaning_easy",
-    "data_cleaning_medium",
-    "data_cleaning_hard",
-    "content_moderation_easy",
-    "content_moderation_medium",
-    "content_moderation_hard",
+    "email_triage_easy", "email_triage_medium", "email_triage_hard",
+    "code_review_easy", "code_review_medium", "code_review_hard",
+    "data_cleaning_easy", "data_cleaning_medium", "data_cleaning_hard",
+    "content_moderation_easy", "content_moderation_medium", "content_moderation_hard",
 ]
 
 SYSTEM_PROMPT = (
     "You are an expert AI agent completing structured real-world tasks.\n"
-    "You will receive task context and instructions.\n"
-    "Respond ONLY with a valid JSON object as the action payload — "
-    "no explanation, no markdown, no code fences.\n"
-    "Your response must be a single raw JSON object."
+    "Respond ONLY with a valid JSON object as the action payload.\n"
+    "No explanation. No markdown. No code fences.\n"
+    "Start with { and end with }."
 )
 
-# ── Progress bar helpers ──────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
-def progress_bar(current: int, total: int, width: int = 40) -> str:
+def progress_bar(current, total, width=40):
     filled = int(width * current / total)
-    bar    = "█" * filled + "░" * (width - filled)
-    pct    = int(100 * current / total)
-    return f"[{bar}] {pct:3d}%  ({current}/{total})"
+    return f"[{'█'*filled}{'░'*(width-filled)}] {int(100*current/total):3d}%  ({current}/{total})"
 
-
-def score_bar(score: float, width: int = 10) -> str:
+def score_bar(score, width=10):
     filled = int(width * score)
     return "█" * filled + "░" * (width - filled)
 
-
-# ── JSON extraction ───────────────────────────────────────────────────────────
-
-def extract_json(text: str) -> dict:
+def extract_json(text):
+    if not text:
+        return {}
     text = text.strip()
+    # Direct parse
     try:
-        return json.loads(text)
+        r = json.loads(text)
+        if isinstance(r, dict):
+            return r
     except Exception:
         pass
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(1))
-        except Exception:
-            pass
+    # Strip fences
+    cleaned = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
+    cleaned = re.sub(r"\s*```$", "", cleaned, flags=re.MULTILINE).strip()
+    try:
+        r = json.loads(cleaned)
+        if isinstance(r, dict):
+            return r
+    except Exception:
+        pass
+    # Find largest { } block
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
         try:
-            return json.loads(match.group(0))
+            r = json.loads(match.group(0))
+            if isinstance(r, dict):
+                return r
         except Exception:
             pass
     return {}
 
 
-# ── Single-task inference ─────────────────────────────────────────────────────
+# ── Single task ───────────────────────────────────────────────────────────────
 
-def run_task(client, task_id: str, env, INSTRUCTIONS) -> dict:
+def run_task(client, task_id, INSTRUCTIONS):
+    from server.Meta_environment import MetaEnvironment
+    from models import MetaAction
+
     agent = "_".join(task_id.split("_")[:-1])
 
-    # Probe to load context
+    # Load context properly — get BOTH agent_ctx and grader_ctx
+    env = MetaEnvironment()
+    env.reset()
     try:
-        from models import MetaAction
-        env.reset()
-        probe_msg = json.dumps({
-            "agent":   agent,
-            "task_id": task_id,
-            "payload": {"_probe": True},
-        })
-        probe_obs  = env.step(MetaAction(message=probe_msg))
-        instructions = INSTRUCTIONS.get(task_id, probe_obs.instructions)
-        context      = probe_obs.context
-        difficulty   = probe_obs.difficulty
+        agent_ctx, grader_ctx, difficulty = env._load_context(task_id)
     except Exception as e:
-        return {
-            "task_id":        task_id,
-            "agent":          agent,
-            "difficulty":     "unknown",
-            "score":          0.0,
-            "feedback":       f"Probe failed: {e}",
-            "partial_credits": {},
-            "reward":         0.0,
-            "error":          str(e),
-        }
+        return {"task_id": task_id, "agent": agent, "difficulty": "unknown",
+                "score": 0.0, "feedback": f"Context load failed: {e}",
+                "partial_credits": {}, "reward": 0.0}
+
+    instructions = INSTRUCTIONS.get(task_id, "")
 
     user_prompt = (
         f"Task ID: {task_id}\n"
         f"Difficulty: {difficulty}\n\n"
         f"Instructions:\n{instructions}\n\n"
-        f"Context:\n{json.dumps(context, indent=2)}\n\n"
-        "Respond with ONLY the payload JSON object."
+        f"Context (the data you must work with):\n{json.dumps(agent_ctx, indent=2)}\n\n"
+        "IMPORTANT: Respond with ONLY a raw JSON object. "
+        "No explanation. No markdown. No code fences. "
+        "Start your response with { and end with }."
     )
 
-    # Call model via Groq (OpenAI-compatible)
+    # Call model
     payload = {}
-    raw     = ""
     try:
         response = client.chat.completions.create(
             model=MODEL_NAME,
@@ -131,19 +123,18 @@ def run_task(client, task_id: str, env, INSTRUCTIONS) -> dict:
         )
         raw     = response.choices[0].message.content or ""
         payload = extract_json(raw)
+        if not payload:
+            print(f"    [WARN] Empty JSON from model. Raw: {raw[:200]}")
     except Exception as e:
+        print(f"    [ERROR] API call failed: {e}")
         payload = {}
-        raw     = str(e)
 
-    # Grade
+    # Grade using grader_ctx (has labels/answers) not agent_ctx
     try:
-        from server.Meta_environment import MetaEnvironment
-        from models import MetaAction
-
         env2 = MetaEnvironment()
         env2.reset()
-        env2._current_agent_context  = context
-        env2._current_grader_context = context
+        env2._current_agent_context  = agent_ctx
+        env2._current_grader_context = grader_ctx   # ← key fix
         env2._current_task_id        = task_id
 
         action_msg = json.dumps({
@@ -151,60 +142,50 @@ def run_task(client, task_id: str, env, INSTRUCTIONS) -> dict:
             "task_id": task_id,
             "payload": payload,
         })
-        result_obs = env2.step(MetaAction(message=action_msg))
-        score      = result_obs.score
-        feedback   = result_obs.feedback
-        partial    = result_obs.partial_credits
-        reward     = result_obs.reward
-        difficulty = result_obs.difficulty
+        obs = env2.step(MetaAction(message=action_msg))
+        return {
+            "task_id":         task_id,
+            "agent":           agent,
+            "difficulty":      obs.difficulty,
+            "score":           obs.score,
+            "feedback":        obs.feedback,
+            "partial_credits": obs.partial_credits,
+            "reward":          obs.reward,
+        }
     except Exception as e:
-        score    = 0.0
-        feedback = f"Grading error: {e}"
-        partial  = {}
-        reward   = 0.0
-
-    return {
-        "task_id":         task_id,
-        "agent":           agent,
-        "difficulty":      difficulty,
-        "score":           score,
-        "feedback":        feedback,
-        "partial_credits": partial,
-        "reward":          reward,
-    }
+        return {
+            "task_id":         task_id,
+            "agent":           agent,
+            "difficulty":      difficulty,
+            "score":           0.0,
+            "feedback":        f"Grading error: {e}",
+            "partial_credits": {},
+            "reward":          0.0,
+        }
 
 
-# ── Main runner ───────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────────────
 
-def run_all(api_base_url: str, model_name: str, hf_token: str) -> list:
-    if not hf_token:
+def run_all(api_base_url, model_name, hf_token):
+    if not hf_token or hf_token == "YOUR_HF_TOKEN_HERE":
         print("❌ ERROR: HF_TOKEN is not set.")
-        print("   Set it to your Groq API key (get one free at https://console.groq.com)")
-        print("   export HF_TOKEN=gsk_...")
+        print("   Go to https://huggingface.co/settings/tokens → New token")
         sys.exit(1)
 
     try:
         from openai import OpenAI
     except ImportError:
-        print("ERROR: openai package not installed. Run: pip install openai")
+        print("ERROR: pip install openai")
         sys.exit(1)
 
-    # Groq is OpenAI-compatible — just point base_url at Groq
-    client = OpenAI(
-        api_key=hf_token,
-        base_url=api_base_url,
-    )
-
-    # Local imports
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from server.Meta_environment import MetaEnvironment, INSTRUCTIONS
+        from server.Meta_environment import INSTRUCTIONS
     except ImportError as e:
-        print(f"ERROR: Could not import Meta environment: {e}")
-        print("Make sure you're running from the repo root: python inference.py")
+        print(f"ERROR: {e}")
         sys.exit(1)
 
-    env     = MetaEnvironment()
+    client = OpenAI(api_key=hf_token, base_url=api_base_url)
     results = []
 
     print()
@@ -223,23 +204,16 @@ def run_all(api_base_url: str, model_name: str, hf_token: str) -> list:
         print(f"  {progress_bar(i, len(TASK_IDS))}  {task_id}")
         sys.stdout.flush()
 
-        t0      = time.time()
-        result  = run_task(client, task_id, env, INSTRUCTIONS)
+        t0     = time.time()
+        result = run_task(client, task_id, INSTRUCTIONS)
         elapsed = time.time() - t0
-
         results.append(result)
 
-        bar  = score_bar(result["score"])
         diff = result["difficulty"].upper()[:4]
-        print(
-            f"  ✓ [{diff:4s}] {task_id:<35} "
-            f"[{bar}] {result['score']:.2f}  "
-            f"({elapsed:.1f}s)  {result['feedback'][:60]}"
-        )
+        bar  = score_bar(result["score"])
+        print(f"  ✓ [{diff:4s}] {task_id:<35} [{bar}] {result['score']:.2f}  ({elapsed:.1f}s)  {result['feedback'][:60]}")
         sys.stdout.flush()
-
-        # Small delay to respect Groq rate limits (free tier: 30 req/min)
-        time.sleep(2)
+        time.sleep(1)
 
     total_time = time.time() - start
     avg_score  = sum(r["score"] for r in results) / len(results)
@@ -254,38 +228,17 @@ def run_all(api_base_url: str, model_name: str, hf_token: str) -> list:
     print("╚══════════════════════════════════════════════════════════════════╝")
     print()
 
-    # Per-agent summary
     agents = ["email_triage", "code_review", "data_cleaning", "content_moderation"]
     print("  Per-Agent Summary:")
     for ag in agents:
-        ag_results = [r for r in results if r["agent"] == ag]
-        ag_avg     = sum(r["score"] for r in ag_results) / len(ag_results) if ag_results else 0
-        ag_bar     = score_bar(ag_avg)
-        print(f"    {ag:<30} [{ag_bar}] {ag_avg:.2f}")
-
+        ag_r   = [r for r in results if r["agent"] == ag]
+        ag_avg = sum(r["score"] for r in ag_r) / len(ag_r) if ag_r else 0
+        print(f"    {ag:<30} [{score_bar(ag_avg)}] {ag_avg:.2f}")
     print()
     return results
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
-
 if __name__ == "__main__":
-    # Load .env file if present
-    env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-    if os.path.exists(env_file):
-        with open(env_file) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, _, val = line.partition("=")
-                    os.environ.setdefault(key.strip(), val.strip())
-
-    # Re-read after .env load
-    API_BASE_URL = os.environ.get("API_BASE_URL", "https://api.groq.com/openai/v1")
-    MODEL_NAME   = os.environ.get("MODEL_NAME",   "llama-3.3-70b-versatile")
-    HF_TOKEN     = os.environ.get("HF_TOKEN",     "")
-
     results = run_all(API_BASE_URL, MODEL_NAME, HF_TOKEN)
-
     print("Full Results JSON:")
     print(json.dumps(results, indent=2))
