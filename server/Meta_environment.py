@@ -577,23 +577,51 @@ def grade_email_easy(payload: dict, context: dict) -> tuple[float, str, dict]:
     return 0.0, f"[FAIL] Invalid label '{given}'. Must be: spam | important | newsletter.", {"classification": False}
 
 
+def _kendall_tau_score(order: list, correct: list) -> float:
+    """
+    Kendall's tau-based ordering score.
+    Counts concordant pairs (relative order matches) vs total pairs.
+    Much fairer than exact position matching — rewards getting the overall
+    priority ranking right even when a few adjacent items swap.
+    Score range: 0.0 (fully reversed) to 1.0 (perfect order).
+    """
+    n = len(correct)
+    pos = {e: i for i, e in enumerate(correct)}
+    concordant = discordant = 0
+    for i in range(len(order)):
+        for j in range(i + 1, len(order)):
+            if order[i] not in pos or order[j] not in pos:
+                continue
+            if pos[order[i]] < pos[order[j]]:
+                concordant += 1
+            else:
+                discordant += 1
+    total = concordant + discordant
+    return concordant / total if total > 0 else 0.0
+
+
 def grade_email_medium(payload: dict, context: dict) -> tuple[float, str, dict]:
     order   = payload.get("order", [])
     correct = EMAIL_MEDIUM_CORRECT_ORDER
     if not order:
         return 0.0, "[FAIL] No order provided.", {}
-    top2_ok = set(order[:2]) == {"m1", "m5"}
-    top5_ok = order[:5] == correct[:5]
-    full_ok = order == correct
-    hits    = sum(1 for i, e in enumerate(order) if i < len(correct) and e == correct[i])
-    partial = {"top2_critical": top2_ok, "top5_correct": top5_ok, "full_order": full_ok}
+    top2_ok  = set(order[:2]) == {"m1", "m5"}
+    top5_ok  = order[:5] == correct[:5]
+    full_ok  = order == correct
+    tau      = _kendall_tau_score(order, correct)
+    hits     = sum(1 for i, e in enumerate(order) if i < len(correct) and e == correct[i])
+    partial  = {"top2_critical": top2_ok, "top5_correct": top5_ok, "full_order": full_ok}
     if full_ok:
         return 1.0, "[OK] Perfect prioritization!", partial
     if top5_ok:
-        return 0.8, f"[PARTIAL] Top 5 correct. {10-hits} mismatches.", partial
+        score = round(0.8 + tau * 0.2, 2)
+        return score, f"[PARTIAL] Top 5 correct. Kendall tau: {tau:.2f}.", partial
     if top2_ok:
-        return 0.5, f"[PARTIAL] Critical emails (m1, m5) correctly placed first. {hits}/10 positions correct.", partial
-    return round(hits / 10, 2), f"[ERROR] {hits}/10 emails in correct position.", partial
+        # Tau-based score: 0.5 minimum when criticals placed first, scaled up by pair agreement
+        score = round(max(0.5, tau), 2)
+        return score, f"[PARTIAL] Critical emails (m1, m5) first. {hits}/10 exact positions. Tau: {tau:.2f}.", partial
+    score = round(tau * 0.8, 2)
+    return score, f"[ERROR] {hits}/10 exact positions correct. Kendall tau: {tau:.2f}.", partial
 
 
 def grade_email_hard(payload: dict, context: dict) -> tuple[float, str, dict]:
@@ -831,9 +859,9 @@ def grade_ticket_easy(payload: dict, context: dict) -> tuple[float, str, dict]:
     checks   = {"priority_correct": p_ok, "category_correct": c_ok}
     score    = round(sum(checks.values()) / 2, 2)
     tag      = "[OK]" if score == 1.0 else "[PARTIAL]" if score == 0.5 else "[ERROR]"
-    p_symbol = "✓" if p_ok else f"✗ (expected {ticket['correct_priority']})"
-    c_symbol = "✓" if c_ok else f"✗ (expected {ticket['correct_category']})"
-    feedback = f"{tag} Priority: {p_symbol}, Category: {c_symbol}"
+    p_str    = "✓" if p_ok else f"✗ (expected {ticket['correct_priority']})"
+    c_str    = "✓" if c_ok else f"✗ (expected {ticket['correct_category']})"
+    feedback = f"{tag} Priority: {p_str}, Category: {c_str}"
     return score, feedback, checks
 
 
@@ -842,18 +870,25 @@ def grade_ticket_medium(payload: dict) -> tuple[float, str, dict]:
     assigns = payload.get("assignments", {})
     correct_order = TICKET_MEDIUM_CORRECT_ORDER
     correct_teams = TICKET_MEDIUM_CORRECT_TEAMS
-    # Order grading (60% weight)
-    top3_ok = order[:3] == correct_order[:3]
-    full_ok = order == correct_order
-    hits    = sum(1 for i, e in enumerate(order) if i < len(correct_order) and e == correct_order[i])
-    order_score = 1.0 if full_ok else 0.7 if top3_ok else round(hits / 8, 2)
-    # Team assignment grading (40% weight)
-    team_hits = sum(1 for tid, team in correct_teams.items() if assigns.get(tid) == team)
-    team_score = round(team_hits / len(correct_teams), 2)
+    # Order grading via Kendall tau (60% weight)
+    tau      = _kendall_tau_score(order, correct_order)
+    top3_ok  = order[:3] == correct_order[:3]
+    full_ok  = order == correct_order
+    hits     = sum(1 for i, e in enumerate(order) if i < len(correct_order) and e == correct_order[i])
+    order_score = 1.0 if full_ok else round(tau, 2)
+    # Team assignment grading (40% weight) — per-ticket breakdown
+    team_checks = {tid: assigns.get(tid) == team for tid, team in correct_teams.items()}
+    team_hits   = sum(team_checks.values())
+    team_score  = round(team_hits / len(correct_teams), 2)
+    wrong_teams = [f"{tid}(got={assigns.get(tid)},expected={correct_teams[tid]})"
+                   for tid, ok in team_checks.items() if not ok]
     score    = round(order_score * 0.6 + team_score * 0.4, 2)
-    checks   = {"top3_correct": top3_ok, "full_order": full_ok, "team_assignments": team_score == 1.0}
+    checks   = {"top3_correct": top3_ok, "full_order": full_ok,
+                 "team_assignments": team_score == 1.0, **{f"team_{tid}": ok for tid, ok in team_checks.items()}}
     tag      = "[OK]" if score >= 0.95 else "[PARTIAL]" if score >= 0.5 else "[ERROR]"
-    feedback = f"{tag} Order: {hits}/8 correct, Teams: {team_hits}/8 correct."
+    feedback = f"{tag} Order: {hits}/8 exact, Tau: {tau:.2f}, Teams: {team_hits}/8 correct."
+    if wrong_teams:
+        feedback += f" Wrong teams: {', '.join(wrong_teams)}."
     return score, feedback, checks
 
 
@@ -974,13 +1009,16 @@ INSTRUCTIONS: dict[str, str] = {
     ),
     "email_triage_medium": (
         "Prioritize the 10 emails from most urgent (first) to least urgent (last).\n"
-        "Priority tiers:\n"
-        "  Tier 1: Active incidents — production outages, security alerts\n"
-        "  Tier 2: Legal/contract deadlines expiring today or this week\n"
-        "  Tier 3: Financial risk — overdue invoices threatening suspension\n"
-        "  Tier 4: Business deliverables with upcoming hard deadlines\n"
-        "  Tier 5: Social — lunch, anniversaries\n"
-        "  Tier 6: Passive newsletters and promos\n"
+        "Priority tiers — assign each email to a tier first, then order within tiers by deadline/impact:\n"
+        "  Tier 1 (CRITICAL): Active production outages, active security breaches — immediate revenue/safety impact\n"
+        "  Tier 2 (URGENT): Legal agreements or contracts expiring TODAY — deal falls through if unsigned\n"
+        "  Tier 3 (HIGH): Overdue financial obligations threatening service suspension\n"
+        "  Tier 4 (HIGH): Business deliverables with hard deadlines this week\n"
+        "  Tier 5 (LOW): Social — lunch invites, work anniversaries\n"
+        "  Tier 6 (IGNORE): Passive newsletters and promotional content\n"
+        "Within Tier 2: 'TODAY' deadlines rank above 'Friday' deadlines.\n"
+        "Within Tier 4: launch review decks rank above other reviews by proximity to launch date.\n"
+        "Return ALL 10 email IDs ordered most-to-least urgent.\n"
         'Payload: {"order": ["m1", "m5", ...]}'
     ),
     "email_triage_hard": (
@@ -1032,8 +1070,20 @@ INSTRUCTIONS: dict[str, str] = {
         'Payload: {"classifications": [{"id": "m1", "label": "harmful", "reason": "..."}]}'
     ),
     "content_moderation_hard": (
-        "Each case has the SAME text in TWO contexts. Determine the correct label for EACH context.\n"
-        "Note: some texts are harmful regardless of context (dog-whistles, dehumanizing language).\n"
+        "Each case shows the SAME text in TWO different contexts. Determine the correct label for EACH context.\n"
+        "CRITICAL RULES:\n"
+        "  1. Some texts are ALWAYS harmful regardless of context — they use dehumanizing language or\n"
+        "     dog-whistle rhetoric that is harmful no matter what platform or prior message surrounds them.\n"
+        "     TEST: Would a reasonable content moderator flag this text if they saw it with NO context?\n"
+        "     If yes, label it 'harmful' in BOTH contexts.\n"
+        "  2. KEY SIGNAL — comparing humans to animals ('breed like rabbits'), invoking 'replacement' of\n"
+        "     ethnic groups, or using language that strips human dignity is ALWAYS harmful. A 'biology\n"
+        "     classroom' or 'urban planning' framing does NOT make dehumanizing rhetoric acceptable.\n"
+        "  3. Other texts ARE context-dependent — 'disappear' in gaming vs crisis support, 'take out' in\n"
+        "     HR dinner vs extremist forum, 'eliminate the competition' in business vs political violence.\n"
+        "     For these, label each context based on the actual meaning in that specific context.\n"
+        "  4. When in doubt about a text: ask 'is this language that treats a group of people as less than\n"
+        "     human?' If yes → harmful in all contexts. If it's just ambiguous phrasing → context matters.\n"
         'Payload: {"decisions": [{"id": "h1", "context_a_label": "safe", "context_b_label": "harmful"}]}'
     ),
     "ticket_triage_easy": (
@@ -1041,8 +1091,26 @@ INSTRUCTIONS: dict[str, str] = {
         'Payload: {"priority": "critical", "category": "bug"}'
     ),
     "ticket_triage_medium": (
-        "Order 8 tickets by priority (most urgent first) and assign each to the correct team (backend/frontend/devops/billing).\n"
-        'Payload: {"order": ["tk1", ...], "assignments": {"tk1": "backend", ...}}'
+        "Order 8 tickets by priority (most urgent first) and assign each to the correct team.\n"
+        "Priority reasoning:\n"
+        "  1. Production DB down and SSL expiring in 48h are both critical infrastructure\n"
+        "  2. Currency display bug (affects all EU users visibly) ranks above billing revenue leak\n"
+        "  3. Revenue-leak billing bug ranks above invoice PDF generation bug\n"
+        "  4. Feature requests rank below all bugs\n"
+        "Team routing — be precise about these common mistakes:\n"
+        "  backend  = server-side APIs, DB queries, background job processing\n"
+        "  frontend = anything the user SEES in the browser: currency symbols, UI, display bugs, CSV export UI\n"
+        "  devops   = SSL certificates, deployments, infrastructure\n"
+        "  billing  = payment charges, subscription billing, invoice amounts, refunds\n"
+        "  'Wrong currency symbol shown' → frontend (it's a display/rendering bug)\n"
+        "  'Customer billed $0 instead of $299' → billing (it's a charge calculation bug)\n"
+        "  'Invoice PDF generation fails' → backend (server-side PDF generation)\n"
+        "  'Add OAuth2 SSO support' → backend (auth server logic)\n"
+        "  'Redesign onboarding flow' → frontend (UI/UX work)\n"
+        "  'Add CSV export for analytics' → frontend (UI feature)\n"
+        'Payload: {"order": ["tk1", "tk4", "tk2", "tk7", "tk5", "tk3", "tk6", "tk8"], '
+        '"assignments": {"tk1": "backend", "tk2": "frontend", "tk3": "backend", '
+        '"tk4": "devops", "tk5": "backend", "tk6": "frontend", "tk7": "billing", "tk8": "frontend"}}'
     ),
     "ticket_triage_hard": (
         "Analyse the linked incident tickets and produce: root cause analysis, ordered resolution steps, affected services, and severity (P1-P4).\n"
