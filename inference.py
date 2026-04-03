@@ -1,5 +1,6 @@
 """
-inference.py — Meta OpenEnv Hackathon Submission
+inference.py — Meta OpenEnv Hackathon Submission v2.1
+Handles multi-step retry episodes and cross-agent chained task.
 """
 
 import os
@@ -28,13 +29,17 @@ TASK_IDS = [
     "code_review_easy", "code_review_medium", "code_review_hard",
     "data_cleaning_easy", "data_cleaning_medium", "data_cleaning_hard",
     "content_moderation_easy", "content_moderation_medium", "content_moderation_hard",
+    "cross_agent_chain",
 ]
 
 SYSTEM_PROMPT = (
     "You are an expert AI agent completing structured real-world tasks.\n"
-    "Respond ONLY with a valid JSON object as the action payload.\n"
-    "No explanation. No markdown. No code fences.\n"
-    "Start with { and end with }."
+    "You MUST respond with ONLY a valid JSON object as the payload.\n"
+    "Rules:\n"
+    "1. Start your response with { and end with }\n"
+    "2. No markdown, no code fences (no ```), no explanation text\n"
+    "3. No preamble — just the JSON object\n"
+    "4. The JSON must be valid and parseable"
 )
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -48,69 +53,76 @@ def score_bar(score, width=10):
     return "█" * filled + "░" * (width - filled)
 
 def extract_json(text):
+    """Robustly extract a JSON object from model output."""
     if not text:
         return {}
     text = text.strip()
-    # Direct parse
+
+    # Strategy 1: direct parse
     try:
         r = json.loads(text)
         if isinstance(r, dict):
             return r
     except Exception:
         pass
-    # Strip fences
-    cleaned = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
-    cleaned = re.sub(r"\s*```$", "", cleaned, flags=re.MULTILINE).strip()
+
+    # Strategy 2: strip markdown fences
+    cleaned = re.sub(r"^```(?:json)?\s*\n?", "", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\n?```\s*$", "", cleaned, flags=re.MULTILINE).strip()
     try:
         r = json.loads(cleaned)
         if isinstance(r, dict):
             return r
     except Exception:
         pass
-    # Find largest { } block
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match:
-        try:
-            r = json.loads(match.group(0))
-            if isinstance(r, dict):
-                return r
-        except Exception:
-            pass
+
+    # Strategy 3: brace-depth walking (handles nested objects reliably)
+    start = text.find("{")
+    if start != -1:
+        depth = 0
+        for i, ch in enumerate(text[start:], start):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = text[start:i+1]
+                    try:
+                        r = json.loads(candidate)
+                        if isinstance(r, dict):
+                            return r
+                    except Exception:
+                        pass
+                    break
+
     return {}
 
 
-# ── Single task ───────────────────────────────────────────────────────────────
+def unwrap_payload(payload):
+    """If model returned the full action envelope, extract the inner payload."""
+    if payload and "payload" in payload and isinstance(payload["payload"], dict):
+        return payload["payload"]
+    return payload
 
-def run_task(client, task_id, INSTRUCTIONS):
-    from server.Meta_environment import MetaEnvironment
-    from models import MetaAction
 
-    agent = "_".join(task_id.split("_")[:-1])
-
-    # Load context properly — get BOTH agent_ctx and grader_ctx
-    env = MetaEnvironment()
-    env.reset()
-    try:
-        agent_ctx, grader_ctx, difficulty = env._load_context(task_id)
-    except Exception as e:
-        return {"task_id": task_id, "agent": agent, "difficulty": "unknown",
-                "score": 0.0, "feedback": f"Context load failed: {e}",
-                "partial_credits": {}, "reward": 0.0}
-
-    instructions = INSTRUCTIONS.get(task_id, "")
+def call_model(client, task_id, difficulty, instructions, agent_ctx, feedback=None):
+    """Call model. If feedback is provided, this is a retry attempt."""
+    retry_note = ""
+    if feedback:
+        retry_note = (
+            f"\nPREVIOUS ATTEMPT FEEDBACK: {feedback}\n"
+            "Fix the issues described above in your new response.\n"
+        )
 
     user_prompt = (
-        f"Task ID: {task_id}\n"
+        f"Task: {task_id}\n"
         f"Difficulty: {difficulty}\n\n"
-        f"Instructions:\n{instructions}\n\n"
-        f"Context (the data you must work with):\n{json.dumps(agent_ctx, indent=2)}\n\n"
-        "IMPORTANT: Respond with ONLY a raw JSON object. "
-        "No explanation. No markdown. No code fences. "
-        "Start your response with { and end with }."
+        f"Instructions:\n{instructions}\n"
+        f"{retry_note}\n"
+        f"Data to work with:\n{json.dumps(agent_ctx, indent=2)}\n\n"
+        "Respond with ONLY the payload JSON object. Start with { and end with }."
     )
 
-    # Call model
-    payload = {}
     try:
         response = client.chat.completions.create(
             model=MODEL_NAME,
@@ -122,54 +134,75 @@ def run_task(client, task_id, INSTRUCTIONS):
             max_tokens=2000,
         )
         raw     = response.choices[0].message.content or ""
-        payload = extract_json(raw)
+        payload = unwrap_payload(extract_json(raw))
+
         if not payload:
-            print(f"    [WARN] Empty JSON from model. Raw: {raw[:200]}")
-    except Exception as e:
-        print(f"    [ERROR] API call failed: {e}")
-        payload = {}
+            print(f"\n    [DEBUG] Empty JSON. Raw: {repr(raw[:200])}")
+        else:
+            print(f"\n    [DEBUG] Attempt payload keys: {list(payload.keys())}")
 
-    # Grade using grader_ctx (has labels/answers) not agent_ctx
+        return payload
+    except Exception as e:
+        print(f"\n    [ERROR] API call failed: {e}")
+        return {}
+
+
+# ── Single task (handles multi-step retry) ────────────────────────────────────
+
+def run_task(client, task_id, INSTRUCTIONS):
+    from server.Meta_environment import MetaEnvironment
+    from models import MetaAction
+
+    agent = "_".join(task_id.split("_")[:-1]) if task_id != "cross_agent_chain" else "cross_agent"
+
+    # Load context
+    env = MetaEnvironment()
+    env.reset()
     try:
-        env2 = MetaEnvironment()
-        env2.reset()
-        env2._current_agent_context  = agent_ctx
-        env2._current_grader_context = grader_ctx   # ← key fix
-        env2._current_task_id        = task_id
-
-        action_msg = json.dumps({
-            "agent":   agent,
-            "task_id": task_id,
-            "payload": payload,
-        })
-        obs = env2.step(MetaAction(message=action_msg))
-        return {
-            "task_id":         task_id,
-            "agent":           agent,
-            "difficulty":      obs.difficulty,
-            "score":           obs.score,
-            "feedback":        obs.feedback,
-            "partial_credits": obs.partial_credits,
-            "reward":          obs.reward,
-        }
+        agent_ctx, grader_ctx, difficulty = env._load_context(task_id)
     except Exception as e:
-        return {
-            "task_id":         task_id,
-            "agent":           agent,
-            "difficulty":      difficulty,
-            "score":           0.0,
-            "feedback":        f"Grading error: {e}",
-            "partial_credits": {},
-            "reward":          0.0,
-        }
+        return {"task_id": task_id, "agent": agent, "difficulty": "unknown",
+                "score": 0.0, "feedback": f"Context load failed: {e}",
+                "partial_credits": {}, "reward": 0.0}
+
+    instructions = INSTRUCTIONS.get(task_id, "")
+
+    # Set up grading environment with fixed context
+    env2 = MetaEnvironment()
+    env2.reset()
+    env2._current_agent_context  = agent_ctx
+    env2._current_grader_context = grader_ctx
+    env2._current_task_id        = task_id
+
+    # Attempt 1
+    payload  = call_model(client, task_id, difficulty, instructions, agent_ctx)
+    action   = MetaAction(message=json.dumps({"agent": agent, "task_id": task_id, "payload": payload}))
+    obs      = env2.step(action)
+
+    # Attempt 2 if retry available (done=False means retry is offered)
+    if not obs.done and obs.score < 1.0:
+        print(f"\n    [RETRY] Score {obs.score:.2f} — attempting retry with feedback...")
+        time.sleep(1)
+        payload2 = call_model(client, task_id, difficulty, instructions, agent_ctx, feedback=obs.feedback)
+        action2  = MetaAction(message=json.dumps({"agent": agent, "task_id": task_id, "payload": payload2}))
+        obs      = env2.step(action2)
+
+    return {
+        "task_id":         task_id,
+        "agent":           agent,
+        "difficulty":      obs.difficulty,
+        "score":           obs.score,
+        "feedback":        obs.feedback,
+        "partial_credits": obs.partial_credits,
+        "reward":          obs.reward,
+    }
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def run_all(api_base_url, model_name, hf_token):
     if not hf_token or hf_token == "YOUR_HF_TOKEN_HERE":
-        print("❌ ERROR: HF_TOKEN is not set.")
-        print("   Go to https://huggingface.co/settings/tokens → New token")
+        print("ERROR: HF_TOKEN is not set.")
         sys.exit(1)
 
     try:
@@ -185,7 +218,7 @@ def run_all(api_base_url, model_name, hf_token):
         print(f"ERROR: {e}")
         sys.exit(1)
 
-    client = OpenAI(api_key=hf_token, base_url=api_base_url)
+    client  = OpenAI(api_key=hf_token, base_url=api_base_url)
     results = []
 
     print()
@@ -204,14 +237,14 @@ def run_all(api_base_url, model_name, hf_token):
         print(f"  {progress_bar(i, len(TASK_IDS))}  {task_id}")
         sys.stdout.flush()
 
-        t0     = time.time()
-        result = run_task(client, task_id, INSTRUCTIONS)
+        t0      = time.time()
+        result  = run_task(client, task_id, INSTRUCTIONS)
         elapsed = time.time() - t0
         results.append(result)
 
         diff = result["difficulty"].upper()[:4]
         bar  = score_bar(result["score"])
-        print(f"  ✓ [{diff:4s}] {task_id:<35} [{bar}] {result['score']:.2f}  ({elapsed:.1f}s)  {result['feedback'][:60]}")
+        print(f"  ✓ [{diff:4s}] {task_id:<35} [{bar}] {result['score']:.2f}  ({elapsed:.1f}s)  {result['feedback'][:55]}")
         sys.stdout.flush()
         time.sleep(1)
 
@@ -222,13 +255,13 @@ def run_all(api_base_url, model_name, hf_token):
     print(f"  {progress_bar(len(TASK_IDS), len(TASK_IDS))}")
     print()
     print("╔══════════════════════════════════════════════════════════════════╗")
-    print(f"║  📊 Average Score : {avg_score:.4f}                                    ║")
-    print(f"║  ⏱  Total Time    : {total_time:.1f}s                                      ║")
-    print(f"║  ✅ Tasks Passed  : {sum(1 for r in results if r['score'] >= 0.5)}/{len(results)}                                       ║")
+    print(f"║  📊 Average Score : {avg_score:.4f}{'':37}║")
+    print(f"║  ⏱  Total Time    : {total_time:.1f}s{'':39}║")
+    print(f"║  ✅ Tasks Passed  : {sum(1 for r in results if r['score'] >= 0.5)}/{len(results)}{'':42}║")
     print("╚══════════════════════════════════════════════════════════════════╝")
     print()
 
-    agents = ["email_triage", "code_review", "data_cleaning", "content_moderation"]
+    agents = ["email_triage", "code_review", "data_cleaning", "content_moderation", "cross_agent"]
     print("  Per-Agent Summary:")
     for ag in agents:
         ag_r   = [r for r in results if r["agent"] == ag]
