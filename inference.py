@@ -1,13 +1,22 @@
 """
-inference.py — Meta OpenEnv Hackathon Submission v2.1
-Handles multi-step retry episodes and cross-agent chained task.
+inference.py — Meta OpenEnv Hackathon Submission v3.0
+19 tasks: 5 domains × 3 + 4 cross-agent chained tasks.
+Deterministic context, trajectory-aware reward, proper [START]/[STEP]/[END] logging.
+
+Logging format:
+  [START] task=<task_id> env=meta model=<model>
+  [STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
+  [END]   success=<true|false> steps=<n> score=<0.000> rewards=<r1,r2,...>
 """
 
-import os
-import sys
+from __future__ import annotations
+
 import json
+import os
 import re
+import sys
 import time
+from typing import Optional
 
 # ── Load .env ─────────────────────────────────────────────────────────────────
 _env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
@@ -25,11 +34,13 @@ MODEL_NAME   = os.environ.get("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
 HF_TOKEN     = os.environ.get("HF_TOKEN",     "")
 
 TASK_IDS = [
-    "email_triage_easy", "email_triage_medium", "email_triage_hard",
-    "code_review_easy", "code_review_medium", "code_review_hard",
-    "data_cleaning_easy", "data_cleaning_medium", "data_cleaning_hard",
+    "email_triage_easy",   "email_triage_medium",   "email_triage_hard",
+    "code_review_easy",    "code_review_medium",     "code_review_hard",
+    "data_cleaning_easy",  "data_cleaning_medium",   "data_cleaning_hard",
     "content_moderation_easy", "content_moderation_medium", "content_moderation_hard",
-    "cross_agent_chain",
+    "ticket_triage_easy",  "ticket_triage_medium",   "ticket_triage_hard",
+    "cross_agent_chain",   "cross_agent_email_data", "cross_agent_code_email",
+    "cross_agent_mod_escalation",
 ]
 
 SYSTEM_PROMPT = (
@@ -39,34 +50,60 @@ SYSTEM_PROMPT = (
     "1. Start your response with { and end with }\n"
     "2. No markdown, no code fences (no ```), no explanation text\n"
     "3. No preamble — just the JSON object\n"
-    "4. The JSON must be valid and parseable"
+    "4. The JSON must be valid and parseable\n"
+    "5. Follow the payload format exactly as described in the instructions"
 )
+
+SUCCESS_SCORE_THRESHOLD = 0.5
+
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+
+def log_start(task: str, env: str, model: str) -> None:
+    print(f"[START] task={task} env={env} model={model}", flush=True)
+
+
+def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
+    error_val = error if error else "null"
+    done_val  = str(done).lower()
+    # Collapse action to single line, truncate to 120 chars
+    action_oneline = action.replace("\n", " ")[:120]
+    print(
+        f"[STEP] step={step} action={action_oneline} reward={reward:.2f} done={done_val} error={error_val}",
+        flush=True,
+    )
+
+
+def log_end(success: bool, steps: int, score: float, rewards: list[float]) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(
+        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
+        flush=True,
+    )
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def progress_bar(current, total, width=40):
+def progress_bar(current: int, total: int, width: int = 40) -> str:
     filled = int(width * current / total)
     return f"[{'█'*filled}{'░'*(width-filled)}] {int(100*current/total):3d}%  ({current}/{total})"
 
-def score_bar(score, width=10):
+
+def score_bar(score: float, width: int = 10) -> str:
     filled = int(width * score)
     return "█" * filled + "░" * (width - filled)
 
-def extract_json(text):
-    """Robustly extract a JSON object from model output."""
+
+def extract_json(text: str) -> dict:
     if not text:
         return {}
     text = text.strip()
-
-    # Strategy 1: direct parse
     try:
         r = json.loads(text)
         if isinstance(r, dict):
             return r
     except Exception:
         pass
-
-    # Strategy 2: strip markdown fences
     cleaned = re.sub(r"^```(?:json)?\s*\n?", "", text, flags=re.IGNORECASE)
     cleaned = re.sub(r"\n?```\s*$", "", cleaned, flags=re.MULTILINE).strip()
     try:
@@ -75,8 +112,6 @@ def extract_json(text):
             return r
     except Exception:
         pass
-
-    # Strategy 3: brace-depth walking (handles nested objects reliably)
     start = text.find("{")
     if start != -1:
         depth = 0
@@ -86,34 +121,30 @@ def extract_json(text):
             elif ch == "}":
                 depth -= 1
                 if depth == 0:
-                    candidate = text[start:i+1]
                     try:
-                        r = json.loads(candidate)
+                        r = json.loads(text[start:i+1])
                         if isinstance(r, dict):
                             return r
                     except Exception:
                         pass
                     break
-
     return {}
 
 
-def unwrap_payload(payload):
-    """If model returned the full action envelope, extract the inner payload."""
+def unwrap_payload(payload: dict) -> dict:
     if payload and "payload" in payload and isinstance(payload["payload"], dict):
         return payload["payload"]
     return payload
 
 
-def call_model(client, task_id, difficulty, instructions, agent_ctx, feedback=None):
-    """Call model. If feedback is provided, this is a retry attempt."""
+def call_model(client, task_id: str, difficulty: str, instructions: str,
+               agent_ctx: dict, feedback: Optional[str] = None) -> dict:
     retry_note = ""
     if feedback:
         retry_note = (
             f"\nPREVIOUS ATTEMPT FEEDBACK: {feedback}\n"
             "Fix the issues described above in your new response.\n"
         )
-
     user_prompt = (
         f"Task: {task_id}\n"
         f"Difficulty: {difficulty}\n\n"
@@ -122,7 +153,6 @@ def call_model(client, task_id, difficulty, instructions, agent_ctx, feedback=No
         f"Data to work with:\n{json.dumps(agent_ctx, indent=2)}\n\n"
         "Respond with ONLY the payload JSON object. Start with { and end with }."
     )
-
     try:
         response = client.chat.completions.create(
             model=MODEL_NAME,
@@ -135,57 +165,69 @@ def call_model(client, task_id, difficulty, instructions, agent_ctx, feedback=No
         )
         raw     = response.choices[0].message.content or ""
         payload = unwrap_payload(extract_json(raw))
-
         if not payload:
             print(f"\n    [DEBUG] Empty JSON. Raw: {repr(raw[:200])}")
         else:
             print(f"\n    [DEBUG] Attempt payload keys: {list(payload.keys())}")
-
         return payload
     except Exception as e:
         print(f"\n    [ERROR] API call failed: {e}")
         return {}
 
 
-# ── Single task (handles multi-step retry) ────────────────────────────────────
+# ── Single task episode ───────────────────────────────────────────────────────
 
-def run_task(client, task_id, INSTRUCTIONS):
+def run_task(client, task_id: str, INSTRUCTIONS: dict) -> dict:
     from server.Meta_environment import MetaEnvironment
     from models import MetaAction
 
-    agent = "_".join(task_id.split("_")[:-1]) if task_id != "cross_agent_chain" else "cross_agent"
+    agent = (
+        "_".join(task_id.split("_")[:-1])
+        if not task_id.startswith("cross_agent")
+        else "cross_agent"
+    )
 
-    # Load context
     env = MetaEnvironment()
     env.reset()
     try:
         agent_ctx, grader_ctx, difficulty = env._load_context(task_id)
     except Exception as e:
-        return {"task_id": task_id, "agent": agent, "difficulty": "unknown",
-                "score": 0.0, "feedback": f"Context load failed: {e}",
-                "partial_credits": {}, "reward": 0.0}
+        return {
+            "task_id": task_id, "agent": agent, "difficulty": "unknown",
+            "score": 0.0, "feedback": f"Context load failed: {e}",
+            "partial_credits": {}, "reward": 0.0,
+        }
 
     instructions = INSTRUCTIONS.get(task_id, "")
 
-    # Set up grading environment with fixed context
     env2 = MetaEnvironment()
     env2.reset()
     env2._current_agent_context  = agent_ctx
     env2._current_grader_context = grader_ctx
     env2._current_task_id        = task_id
 
+    rewards: list[float] = []
+    log_start(task_id, "meta", MODEL_NAME)
+
     # Attempt 1
     payload  = call_model(client, task_id, difficulty, instructions, agent_ctx)
     action   = MetaAction(message=json.dumps({"agent": agent, "task_id": task_id, "payload": payload}))
     obs      = env2.step(action)
+    rewards.append(obs.reward)
+    log_step(1, json.dumps(payload)[:80], obs.reward, obs.done, None)
 
-    # Attempt 2 if retry available (done=False means retry is offered)
+    # Attempt 2 if retry available
     if not obs.done and obs.score < 1.0:
         print(f"\n    [RETRY] Score {obs.score:.2f} — attempting retry with feedback...")
         time.sleep(1)
         payload2 = call_model(client, task_id, difficulty, instructions, agent_ctx, feedback=obs.feedback)
         action2  = MetaAction(message=json.dumps({"agent": agent, "task_id": task_id, "payload": payload2}))
         obs      = env2.step(action2)
+        rewards.append(obs.reward)
+        log_step(2, json.dumps(payload2)[:80], obs.reward, obs.done, None)
+
+    success = obs.score >= SUCCESS_SCORE_THRESHOLD
+    log_end(success, len(rewards), obs.score, rewards)
 
     return {
         "task_id":         task_id,
@@ -200,7 +242,7 @@ def run_task(client, task_id, INSTRUCTIONS):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def run_all(api_base_url, model_name, hf_token):
+def run_all(api_base_url: str, model_name: str, hf_token: str) -> list[dict]:
     if not hf_token or hf_token == "YOUR_HF_TOKEN_HERE":
         print("ERROR: HF_TOKEN is not set.")
         sys.exit(1)
@@ -219,7 +261,7 @@ def run_all(api_base_url, model_name, hf_token):
         sys.exit(1)
 
     client  = OpenAI(api_key=hf_token, base_url=api_base_url)
-    results = []
+    results: list[dict] = []
 
     print()
     print("╔══════════════════════════════════════════════════════════════════╗")
@@ -231,7 +273,7 @@ def run_all(api_base_url, model_name, hf_token):
     print("╚══════════════════════════════════════════════════════════════════╝")
     print()
 
-    start = time.time()
+    start_all = time.time()
 
     for i, task_id in enumerate(TASK_IDS):
         print(f"  {progress_bar(i, len(TASK_IDS))}  {task_id}")
@@ -244,12 +286,13 @@ def run_all(api_base_url, model_name, hf_token):
 
         diff = result["difficulty"].upper()[:4]
         bar  = score_bar(result["score"])
-        print(f"  ✓ [{diff:4s}] {task_id:<35} [{bar}] {result['score']:.2f}  ({elapsed:.1f}s)  {result['feedback'][:55]}")
+        print(f"  ✓ [{diff:4s}] {task_id:<40} [{bar}] {result['score']:.2f}  ({elapsed:.1f}s)  {result['feedback'][:50]}")
         sys.stdout.flush()
         time.sleep(1)
 
-    total_time = time.time() - start
+    total_time = time.time() - start_all
     avg_score  = sum(r["score"] for r in results) / len(results)
+    passed     = sum(1 for r in results if r["score"] >= SUCCESS_SCORE_THRESHOLD)
 
     print()
     print(f"  {progress_bar(len(TASK_IDS), len(TASK_IDS))}")
@@ -257,16 +300,19 @@ def run_all(api_base_url, model_name, hf_token):
     print("╔══════════════════════════════════════════════════════════════════╗")
     print(f"║  📊 Average Score : {avg_score:.4f}{'':37}║")
     print(f"║  ⏱  Total Time    : {total_time:.1f}s{'':39}║")
-    print(f"║  ✅ Tasks Passed  : {sum(1 for r in results if r['score'] >= 0.5)}/{len(results)}{'':42}║")
+    print(f"║  ✅ Tasks Passed  : {passed}/{len(results)}{'':42}║")
     print("╚══════════════════════════════════════════════════════════════════╝")
     print()
 
-    agents = ["email_triage", "code_review", "data_cleaning", "content_moderation", "cross_agent"]
+    agents = [
+        "email_triage", "code_review", "data_cleaning",
+        "content_moderation", "ticket_triage", "cross_agent",
+    ]
     print("  Per-Agent Summary:")
     for ag in agents:
         ag_r   = [r for r in results if r["agent"] == ag]
-        ag_avg = sum(r["score"] for r in ag_r) / len(ag_r) if ag_r else 0
-        print(f"    {ag:<30} [{score_bar(ag_avg)}] {ag_avg:.2f}")
+        ag_avg = sum(r["score"] for r in ag_r) / len(ag_r) if ag_r else 0.0
+        print(f"    {ag:<35} [{score_bar(ag_avg)}] {ag_avg:.2f}")
     print()
     return results
 

@@ -1,11 +1,13 @@
 spec_version: 1
 name: Meta
 description: >
-  Meta is the first multi-domain OpenEnv environment featuring 4 AI agents
-  (Email Triage, Code Review, Data Cleaning, Content Moderation) across 12
-  real-world tasks (easy/medium/hard). Built for multi-task learning,
-  transfer learning, and generalist agent research.
-version: "2.0.0"
+  Meta is the first multi-domain OpenEnv environment featuring 5 AI agents
+  (Email Triage, Code Review, Data Cleaning, Content Moderation, Ticket Triage)
+  across 15 real-world tasks (easy/medium/hard) plus 4 cross-agent chained tasks.
+  Built for multi-task learning, transfer learning, and generalist agent research.
+  v3.0: deterministic context loading, harder hard tasks (8 vulnerabilities,
+  adversarial content moderation), 5th domain, 4 cross-agent chained tasks.
+version: "3.0.0"
 type: space
 runtime: fastapi
 app: server.app:app
@@ -21,8 +23,11 @@ tags:
   - code-review
   - data-cleaning
   - content-moderation
+  - ticket-triage
+  - cross-agent
 
 tasks:
+  # ── Email Triage ──────────────────────────────────────────────────────────
   - id: email_triage_easy
     agent: email_triage
     difficulty: easy
@@ -38,6 +43,7 @@ tasks:
     difficulty: hard
     description: Draft a professional, empathetic reply to a complex customer complaint.
 
+  # ── Code Review ───────────────────────────────────────────────────────────
   - id: code_review_easy
     agent: code_review
     difficulty: easy
@@ -52,9 +58,11 @@ tasks:
     agent: code_review
     difficulty: hard
     description: >
-      Detect all 5 security vulnerabilities: SQL injection (x2), XSS,
-      command injection, insecure deserialization.
+      Detect all 8 security vulnerabilities: SQL injection (x2), XSS,
+      command injection, insecure deserialization, timing attack,
+      path traversal, and SSRF.
 
+  # ── Data Cleaning ─────────────────────────────────────────────────────────
   - id: data_cleaning_easy
     agent: data_cleaning
     difficulty: easy
@@ -72,6 +80,7 @@ tasks:
       Detect outliers via IQR/z-score, identify missing values, impute them,
       and return the cleaned dataset.
 
+  # ── Content Moderation ────────────────────────────────────────────────────
   - id: content_moderation_easy
     agent: content_moderation
     difficulty: easy
@@ -86,8 +95,47 @@ tasks:
     agent: content_moderation
     difficulty: hard
     description: >
-      Context-aware moderation: same text in two different contexts —
-      determine the correct label for each context across 3 cases.
+      Context-aware moderation across 6 cases including adversarial dog-whistles
+      and coordinated inauthentic behavior patterns. Same text, two contexts.
+
+  # ── Ticket Triage (NEW) ───────────────────────────────────────────────────
+  - id: ticket_triage_easy
+    agent: ticket_triage
+    difficulty: easy
+    description: Classify a Jira-style support ticket by priority and category.
+
+  - id: ticket_triage_medium
+    agent: ticket_triage
+    difficulty: medium
+    description: Order 8 tickets by priority and assign each to the correct team.
+
+  - id: ticket_triage_hard
+    agent: ticket_triage
+    difficulty: hard
+    description: >
+      Analyse 6 linked incident tickets: produce root cause analysis,
+      ordered resolution steps, affected services list, and P1-P4 severity.
+
+  # ── Cross-Agent Chained (NEW x3) ──────────────────────────────────────────
+  - id: cross_agent_chain
+    agent: cross_agent
+    difficulty: hard
+    description: Classify the email AND identify the code bug in the attachment.
+
+  - id: cross_agent_email_data
+    agent: cross_agent
+    difficulty: hard
+    description: Classify the email urgency AND identify+fix data quality issues in the attachment.
+
+  - id: cross_agent_code_email
+    agent: cross_agent
+    difficulty: hard
+    description: Identify the security vulnerability AND draft a professional disclosure email.
+
+  - id: cross_agent_mod_escalation
+    agent: cross_agent
+    difficulty: hard
+    description: Classify the content AND decide escalation AND draft a moderation notice.
 
 agents:
   - id: email_triage
@@ -102,10 +150,20 @@ agents:
   - id: content_moderation
     tasks: [content_moderation_easy, content_moderation_medium, content_moderation_hard]
 
+  - id: ticket_triage
+    tasks: [ticket_triage_easy, ticket_triage_medium, ticket_triage_hard]
+
+  - id: cross_agent
+    tasks: [cross_agent_chain, cross_agent_email_data, cross_agent_code_email, cross_agent_mod_escalation]
+
 reward:
   range: [0.0, 1.0]
   partial_credit: true
   deterministic: true
+  shaping:
+    speed_bonus: 0.05        # perfect on first attempt
+    improvement_bonus: 0.1   # scaled improvement on retry
+    repeated_failure_penalty: -0.05
 
 baseline:
   model: gpt-4o-mini
@@ -116,10 +174,17 @@ baseline:
     email_triage_hard: 0.67
     code_review_easy: 1.00
     code_review_medium: 0.75
-    code_review_hard: 0.80
+    code_review_hard: 0.50
     data_cleaning_easy: 1.00
     data_cleaning_medium: 0.67
     data_cleaning_hard: 0.67
     content_moderation_easy: 1.00
     content_moderation_medium: 0.75
-    content_moderation_hard: 0.50
+    content_moderation_hard: 0.42
+    ticket_triage_easy: 1.00
+    ticket_triage_medium: 0.70
+    ticket_triage_hard: 0.50
+    cross_agent_chain: 0.75
+    cross_agent_email_data: 0.67
+    cross_agent_code_email: 0.67
+    cross_agent_mod_escalation: 0.83
