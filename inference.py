@@ -35,40 +35,35 @@ if os.path.exists(_env_file):
                 _k, _, _v = _line.partition("=")
                 os.environ.setdefault(_k.strip(), _v.strip())
 
-# ── Provider auto-detection ───────────────────────────────────────────────────
-# Priority: Groq (if GROQ_API_KEY set) → HuggingFace (if all 3 HF vars set)
-# Exception: if API_BASE_URL points to Groq explicitly, use it as-is.
+# ── Mandatory env vars (spec-compliant) ──────────────────────────────────────
+# The hackathon validator sets API_BASE_URL + MODEL_NAME + HF_TOKEN.
+# We must respect those exactly. Groq is only used as local fallback
+# when HF_TOKEN is NOT set.
 
 _groq_key   = os.environ.get("GROQ_API_KEY", "")
 _hf_token   = os.environ.get("HF_TOKEN", "")
 _api_base   = os.environ.get("API_BASE_URL", "")
 _model_name = os.environ.get("MODEL_NAME", "")
 
-if _groq_key:
-    # Groq takes priority — free, fast, no quota issues
+# Spec-required defaults
+API_BASE_URL = _api_base   or "https://router.huggingface.co/v1"
+MODEL_NAME   = _model_name or "Qwen/Qwen2.5-72B-Instruct"
+
+if _hf_token:
+    # HF_TOKEN set — hackathon validator mode or HF local run
+    API_KEY  = _hf_token
+    PROVIDER = "huggingface"
+elif _groq_key:
+    # No HF_TOKEN — use Groq as free local fallback
     API_BASE_URL = "https://api.groq.com/openai/v1"
     MODEL_NAME   = "llama-3.3-70b-versatile"
     API_KEY      = _groq_key
     PROVIDER     = "groq"
-elif _api_base and _model_name and _hf_token:
-    # Hackathon validator mode — HF vars explicitly set, no Groq key
-    API_BASE_URL = _api_base
-    MODEL_NAME   = _model_name
-    API_KEY      = _hf_token
-    PROVIDER     = "huggingface"
-elif _hf_token:
-    API_BASE_URL = _api_base or "https://router.huggingface.co/v1"
-    MODEL_NAME   = _model_name or "Qwen/Qwen2.5-72B-Instruct"
-    API_KEY      = _hf_token
-    PROVIDER     = "huggingface"
 else:
-    # No key found — will fail gracefully in run_all()
-    API_BASE_URL = "https://api.groq.com/openai/v1"
-    MODEL_NAME   = "llama-3.3-70b-versatile"
-    API_KEY      = ""
-    PROVIDER     = "none"
+    API_KEY  = ""
+    PROVIDER = "none"
 
-# Keep HF_TOKEN alias for backward compat with hackathon validator
+# Keep HF_TOKEN alias for backward compat
 HF_TOKEN = API_KEY
 
 
@@ -116,7 +111,7 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
 def log_end(success: bool, steps: int, score: float, rewards: list[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
+        f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}",
         flush=True,
     )
 
