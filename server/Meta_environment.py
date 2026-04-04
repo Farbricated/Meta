@@ -946,18 +946,45 @@ def grade_cross_agent_chain(payload: dict, context: dict) -> tuple[float, str, d
 def grade_cross_agent_email_data(payload: dict, context: dict) -> tuple[float, str, dict]:
     case        = context["case"]
     priority    = payload.get("email_priority", "").strip().lower()
-    data_issues = {k.lower(): str(v).lower() for k, v in payload.get("data_issues", {}).items()}
+    raw_issues  = payload.get("data_issues", {})
     cleaned     = payload.get("cleaned_data", [])
     priority_ok = priority == case["email_priority"].lower()
     expected_issues = case["expected_issues"]
-    issue_hits  = sum(1 for field in expected_issues if field in data_issues)
-    issues_ok   = issue_hits >= 2
-    cleaned_ok  = len(cleaned) == len(case["attachment_data"])
-    checks      = {"priority_correct": priority_ok, "issues_identified": issues_ok, "data_cleaned": cleaned_ok}
-    passed      = sum(checks.values())
-    score       = round(passed / 3, 2)
-    tag         = "[OK]" if score == 1.0 else "[PARTIAL]" if score >= 0.67 else "[ERROR]"
-    feedback    = f"{tag} {passed}/3 cross-agent email+data checks passed."
+
+    # Handle two formats models use:
+    # Format A (correct): {"revenue": "inconsistent...", "region": "casing..."}
+    # Format B (wrong):   {"field": "revenue", "issue": "inconsistent..."}
+    if isinstance(raw_issues, dict):
+        # Check if it's format B — has "field" key instead of field names as keys
+        if "field" in raw_issues and "issue" in raw_issues:
+            # Convert: extract the field name from the "field" value
+            field_val = str(raw_issues.get("field", "")).lower()
+            issue_val = str(raw_issues.get("issue", "")).lower()
+            data_issues = {field_val: issue_val}
+        else:
+            data_issues = {k.lower(): str(v).lower() for k, v in raw_issues.items()}
+    elif isinstance(raw_issues, list):
+        # Format C: [{"field": "revenue", "issue": "..."}]
+        data_issues = {}
+        for item in raw_issues:
+            if isinstance(item, dict):
+                f = str(item.get("field", "")).lower()
+                v = str(item.get("issue", item.get("description", ""))).lower()
+                if f:
+                    data_issues[f] = v
+    else:
+        data_issues = {}
+
+    issue_hits = sum(1 for field in expected_issues if field in data_issues)
+    issues_ok  = issue_hits >= 2
+    cleaned_ok = len(cleaned) == len(case["attachment_data"])
+    checks     = {"priority_correct": priority_ok, "issues_identified": issues_ok, "data_cleaned": cleaned_ok}
+    passed     = sum(checks.values())
+    score      = round(passed / 3, 2)
+    tag        = "[OK]" if score == 1.0 else "[PARTIAL]" if score >= 0.67 else "[ERROR]"
+    feedback   = f"{tag} {passed}/3 cross-agent email+data checks passed."
+    if not issues_ok:
+        feedback += f" Issues found: {issue_hits}/{len(expected_issues)} fields identified."
     return score, feedback, checks
 
 
@@ -1067,6 +1094,13 @@ INSTRUCTIONS: dict[str, str] = {
     ),
     "content_moderation_medium": (
         "Classify each post as 'safe' or 'harmful'. Watch for sarcasm, subtle toxicity, implicit hostility.\n"
+        "IMPORTANT DISTINCTION — not all unusual phrasing is harmful:\n"
+        "  HARMFUL: sarcasm that mocks or demeans a person ('Classic genius move', 'brilliant idea')\n"
+        "  HARMFUL: passive aggression that excludes or belittles ('not cut out for this', 'shouldn't have opinions')\n"
+        "  SAFE: mild, ambiguous comments that express a personal reaction without attacking anyone\n"
+        "  SAFE: backhanded compliments about THINGS (not people) — 'very unique' about a presentation is\n"
+        "         just a mild opinion, not an attack on a person. No target = not harmful.\n"
+        "  SAFE: genuine positivity ('Congrats!', 'Thanks for the feedback')\n"
         'Payload: {"classifications": [{"id": "m1", "label": "harmful", "reason": "..."}]}'
     ),
     "content_moderation_hard": (
@@ -1126,7 +1160,10 @@ INSTRUCTIONS: dict[str, str] = {
         "TWO skills needed:\n"
         "  1. Classify the email urgency: 'critical', 'high', 'medium', 'low'\n"
         "  2. Identify data quality issues in the attachment and return cleaned data\n"
-        'Payload: {"email_priority": "critical", "data_issues": {"field": "issue"}, "cleaned_data": [...]}'
+        "IMPORTANT: data_issues must use field names as keys, NOT 'field'/'issue' as keys.\n"
+        "  CORRECT:   {\"revenue\": \"inconsistent formats\", \"region\": \"inconsistent casing\", \"closed_date\": \"multiple date formats\"}\n"
+        "  INCORRECT: {\"field\": \"revenue\", \"issue\": \"inconsistent formats\"}\n"
+        'Payload: {"email_priority": "critical", "data_issues": {"revenue": "inconsistent formats", "region": "casing issues", "closed_date": "multiple formats"}, "cleaned_data": [...]}'
     ),
     "cross_agent_code_email": (
         "TWO skills needed:\n"

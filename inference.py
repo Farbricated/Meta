@@ -3,6 +3,13 @@ inference.py — Meta OpenEnv Hackathon Submission v3.0
 19 tasks: 5 domains × 3 + 4 cross-agent chained tasks.
 Deterministic context, trajectory-aware reward, proper [START]/[STEP]/[END] logging.
 
+Provider priority (auto-detected from env vars):
+  1. GROQ_API_KEY  → https://api.groq.com/openai/v1  (llama-3.3-70b-versatile) [FREE]
+  2. HF_TOKEN      → API_BASE_URL                     (Qwen/Qwen2.5-72B-Instruct)
+  3. OPENAI_API_KEY → https://api.openai.com/v1       (gpt-4o-mini)
+
+Override everything with: API_BASE_URL + MODEL_NAME + HF_TOKEN (hackathon validator vars)
+
 Logging format:
   [START] task=<task_id> env=meta model=<model>
   [STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
@@ -21,17 +28,49 @@ from typing import Optional
 # ── Load .env ─────────────────────────────────────────────────────────────────
 _env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 if os.path.exists(_env_file):
-    with open(_env_file) as _f:
+    with open(_env_file, encoding="utf-8", errors="ignore") as _f:
         for _line in _f:
             _line = _line.strip()
             if _line and not _line.startswith("#") and "=" in _line:
                 _k, _, _v = _line.partition("=")
                 os.environ.setdefault(_k.strip(), _v.strip())
 
-# ── Mandatory env vars ────────────────────────────────────────────────────────
-API_BASE_URL = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME   = os.environ.get("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
-HF_TOKEN     = os.environ.get("HF_TOKEN",     "")
+# ── Provider auto-detection ───────────────────────────────────────────────────
+# Priority: Groq (if GROQ_API_KEY set) → HuggingFace (if all 3 HF vars set)
+# Exception: if API_BASE_URL points to Groq explicitly, use it as-is.
+
+_groq_key   = os.environ.get("GROQ_API_KEY", "")
+_hf_token   = os.environ.get("HF_TOKEN", "")
+_api_base   = os.environ.get("API_BASE_URL", "")
+_model_name = os.environ.get("MODEL_NAME", "")
+
+if _groq_key:
+    # Groq takes priority — free, fast, no quota issues
+    API_BASE_URL = "https://api.groq.com/openai/v1"
+    MODEL_NAME   = "llama-3.3-70b-versatile"
+    API_KEY      = _groq_key
+    PROVIDER     = "groq"
+elif _api_base and _model_name and _hf_token:
+    # Hackathon validator mode — HF vars explicitly set, no Groq key
+    API_BASE_URL = _api_base
+    MODEL_NAME   = _model_name
+    API_KEY      = _hf_token
+    PROVIDER     = "huggingface"
+elif _hf_token:
+    API_BASE_URL = _api_base or "https://router.huggingface.co/v1"
+    MODEL_NAME   = _model_name or "Qwen/Qwen2.5-72B-Instruct"
+    API_KEY      = _hf_token
+    PROVIDER     = "huggingface"
+else:
+    # No key found — will fail gracefully in run_all()
+    API_BASE_URL = "https://api.groq.com/openai/v1"
+    MODEL_NAME   = "llama-3.3-70b-versatile"
+    API_KEY      = ""
+    PROVIDER     = "none"
+
+# Keep HF_TOKEN alias for backward compat with hackathon validator
+HF_TOKEN = API_KEY
+
 
 TASK_IDS = [
     "email_triage_easy",   "email_triage_medium",   "email_triage_hard",
@@ -243,8 +282,12 @@ def run_task(client, task_id: str, INSTRUCTIONS: dict) -> dict:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def run_all(api_base_url: str, model_name: str, hf_token: str) -> list[dict]:
-    if not hf_token or hf_token == "YOUR_HF_TOKEN_HERE":
-        print("ERROR: HF_TOKEN is not set.")
+    api_key = hf_token or API_KEY
+    if not api_key:
+        print("ERROR: No API key found.")
+        print("Set one of:")
+        print("  GROQ_API_KEY=gsk_...   (free at https://console.groq.com)")
+        print("  HF_TOKEN=hf_...        (HuggingFace token)")
         sys.exit(1)
 
     try:
@@ -260,13 +303,18 @@ def run_all(api_base_url: str, model_name: str, hf_token: str) -> list[dict]:
         print(f"ERROR: {e}")
         sys.exit(1)
 
-    client  = OpenAI(api_key=hf_token, base_url=api_base_url)
+    # Groq free tier: 30 req/min — add a small sleep between tasks
+    is_groq  = "groq.com" in api_base_url
+    task_sleep = 2.0 if is_groq else 1.0
+
+    client  = OpenAI(api_key=api_key, base_url=api_base_url)
     results: list[dict] = []
 
     print()
     print("╔══════════════════════════════════════════════════════════════════╗")
     print("║        Meta OpenEnv — Inference Runner (OpenEnv Hackathon 2026) ║")
     print("╠══════════════════════════════════════════════════════════════════╣")
+    print(f"║  Provider : {PROVIDER:<53}║")
     print(f"║  API Base : {api_base_url:<53}║")
     print(f"║  Model    : {model_name:<53}║")
     print(f"║  Tasks    : {len(TASK_IDS):<53}║")
@@ -288,7 +336,7 @@ def run_all(api_base_url: str, model_name: str, hf_token: str) -> list[dict]:
         bar  = score_bar(result["score"])
         print(f"  ✓ [{diff:4s}] {task_id:<40} [{bar}] {result['score']:.2f}  ({elapsed:.1f}s)  {result['feedback'][:50]}")
         sys.stdout.flush()
-        time.sleep(1)
+        time.sleep(task_sleep)
 
     total_time = time.time() - start_all
     avg_score  = sum(r["score"] for r in results) / len(results)
