@@ -1,5 +1,5 @@
 """
-inference.py — Meta OpenEnv Hackathon Submission v3.1
+inference.py — Meta OpenEnv Hackathon Submission v3.2
 24 tasks: 5 domains × 4 (easy/medium/hard/expert) + 4 cross-agent chained tasks.
 
 Provider priority (auto-detected from env vars):
@@ -12,7 +12,9 @@ Logging format:
   [STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
   [END]   success=<true|false> steps=<n> score=<0.00> rewards=<r1,r2,...>
 
-v3.1: adaptive backoff on 429 (Groq TPM limit 12k — avg ~690 tokens/req → safe at 1 req/3.5s)
+v3.2: handles both TPM (per-minute) and TPD (per-day) Groq rate limits correctly.
+      TPM → short backoff and retry.
+      TPD → wait for the exact reset time reported in the error, then retry.
 """
 
 from __future__ import annotations
@@ -37,23 +39,30 @@ if os.path.exists(_env_file):
 # ── Provider resolution ───────────────────────────────────────────────────────
 _groq_key   = os.environ.get("GROQ_API_KEY", "")
 _hf_token   = os.environ.get("HF_TOKEN", "")
+_openai_key = os.environ.get("OPENAI_API_KEY", "")
 _api_base   = os.environ.get("API_BASE_URL", "")
 _model_name = os.environ.get("MODEL_NAME", "")
 
-API_BASE_URL = _api_base   or "https://router.huggingface.co/v1"
-MODEL_NAME   = _model_name or "Qwen/Qwen2.5-72B-Instruct"
-
-if _hf_token:
-    API_KEY  = _hf_token
-    PROVIDER = "huggingface"
-elif _groq_key:
+if _groq_key:
     API_BASE_URL = "https://api.groq.com/openai/v1"
-    MODEL_NAME   = "llama-3.3-70b-versatile"
+    MODEL_NAME   = _model_name or "llama-3.3-70b-versatile"
     API_KEY      = _groq_key
     PROVIDER     = "groq"
+elif _hf_token:
+    API_BASE_URL = _api_base or "https://router.huggingface.co/v1"
+    MODEL_NAME   = _model_name or "Qwen/Qwen2.5-72B-Instruct"
+    API_KEY      = _hf_token
+    PROVIDER     = "huggingface"
+elif _openai_key:
+    API_BASE_URL = "https://api.openai.com/v1"
+    MODEL_NAME   = _model_name or "gpt-4o-mini"
+    API_KEY      = _openai_key
+    PROVIDER     = "openai"
 else:
-    API_KEY  = ""
-    PROVIDER = "none"
+    API_BASE_URL = _api_base or "https://router.huggingface.co/v1"
+    MODEL_NAME   = _model_name or "Qwen/Qwen2.5-72B-Instruct"
+    API_KEY      = ""
+    PROVIDER     = "none"
 
 HF_TOKEN = API_KEY
 
@@ -79,10 +88,32 @@ SYSTEM_PROMPT = (
 
 SUCCESS_SCORE_THRESHOLD = 0.5
 
-# Groq free tier: 12,000 TPM, avg ~690 tokens/req → safe floor = 3.5s
-# Actual logs show 8.7% rate-limit rate at 2s sleep → bumped to 3.5s
-GROQ_SLEEP    = 3.5
+# Groq free tier: 30 req/min TPM limit → 2s is safe per request
+# TPD limit is 100k tokens/day — handled separately via TPD detection
+GROQ_SLEEP    = 2.0
 DEFAULT_SLEEP = 1.0
+
+# Max seconds to wait for TPD reset before giving up (20 min)
+MAX_TPD_WAIT = 1200
+
+
+# ── Rate limit parsing ────────────────────────────────────────────────────────
+
+def _parse_wait_seconds(err_str: str) -> float:
+    """Extract the suggested wait time in seconds from a Groq 429 error message."""
+    # Format: "Please try again in 12m50.688s" or "56.16s" or "1m5.664s"
+    match = re.search(r"try again in ([\d.]+)m([\d.]+)s", err_str)
+    if match:
+        return float(match.group(1)) * 60 + float(match.group(2))
+    match = re.search(r"try again in ([\d.]+)s", err_str)
+    if match:
+        return float(match.group(1))
+    return 0.0
+
+
+def _is_tpd_limit(err_str: str) -> bool:
+    """Returns True if the error is a tokens-per-day limit (not per-minute)."""
+    return "tokens per day" in err_str.lower() or "tpd" in err_str.lower()
 
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -161,7 +192,10 @@ def unwrap_payload(payload: dict) -> dict:
 def call_model(client, task_id: str, difficulty: str, instructions: str,
                agent_ctx: dict, feedback: Optional[str] = None,
                is_groq: bool = False) -> dict:
-    """Call the model with adaptive retry on 429 rate-limit errors."""
+    """
+    Call the model with adaptive retry on rate limit errors.
+    Distinguishes between TPM (per-minute, short wait) and TPD (per-day, long wait).
+    """
     retry_note = ""
     if feedback:
         retry_note = (
@@ -177,8 +211,9 @@ def call_model(client, task_id: str, difficulty: str, instructions: str,
         "Respond with ONLY the payload JSON object. Start with { and end with }."
     )
 
-    max_api_retries = 4
-    backoff = 4.0
+    max_api_retries = 6
+    tpm_backoff     = 4.0
+
     for attempt in range(max_api_retries):
         try:
             response = client.chat.completions.create(
@@ -197,19 +232,35 @@ def call_model(client, task_id: str, difficulty: str, instructions: str,
             else:
                 print(f"\n    [DEBUG] Payload keys: {list(payload.keys())}")
             return payload
+
         except Exception as e:
             err_str = str(e)
+
             if "429" in err_str or "rate_limit" in err_str.lower():
-                # Parse suggested wait time from error message if available
-                wait_match = re.search(r"try again in ([\d.]+)", err_str)
-                wait_time  = float(wait_match.group(1)) + 0.5 if wait_match else backoff
-                wait_time  = max(wait_time, backoff)
-                print(f"\n    [RATE LIMIT] Waiting {wait_time:.1f}s before retry {attempt+1}/{max_api_retries}...")
-                time.sleep(wait_time)
-                backoff = min(backoff * 1.5, 30.0)
+                wait_secs = _parse_wait_seconds(err_str)
+
+                if _is_tpd_limit(err_str):
+                    # Tokens-per-day exhausted — must wait for daily reset
+                    if wait_secs > MAX_TPD_WAIT:
+                        print(f"\n    [TPD LIMIT] Daily token limit exhausted. "
+                              f"Reset in {wait_secs/60:.1f}min — exceeds max wait. Skipping task.")
+                        return {}
+                    wait_secs = max(wait_secs + 5, 60)  # add 5s buffer
+                    print(f"\n    [TPD LIMIT] Daily token limit exhausted. "
+                          f"Waiting {wait_secs/60:.1f}min for reset (attempt {attempt+1}/{max_api_retries})...")
+                    time.sleep(wait_secs)
+                else:
+                    # TPM limit — short wait
+                    wait_time = max(wait_secs + 0.5, tpm_backoff) if wait_secs > 0 else tpm_backoff
+                    wait_time = min(wait_time, 60.0)
+                    print(f"\n    [RATE LIMIT] Waiting {wait_time:.1f}s before retry "
+                          f"{attempt+1}/{max_api_retries}...")
+                    time.sleep(wait_time)
+                    tpm_backoff = min(tpm_backoff * 1.5, 60.0)
             else:
                 print(f"\n    [ERROR] API call failed: {e}")
                 return {}
+
     print(f"\n    [ERROR] All {max_api_retries} retries exhausted.")
     return {}
 
@@ -286,8 +337,10 @@ def run_all(api_base_url: str, model_name: str, hf_token: str) -> list[dict]:
     api_key = hf_token or API_KEY
     if not api_key:
         print("ERROR: No API key found.")
-        print("  GROQ_API_KEY=gsk_...   (free at https://console.groq.com)")
-        print("  HF_TOKEN=hf_...        (HuggingFace token)")
+        print("  Set one of:")
+        print("  GROQ_API_KEY=gsk_...    (free at https://console.groq.com)")
+        print("  HF_TOKEN=hf_...         (HuggingFace token)")
+        print("  OPENAI_API_KEY=sk-...   (OpenAI)")
         sys.exit(1)
 
     try:
@@ -317,7 +370,7 @@ def run_all(api_base_url: str, model_name: str, hf_token: str) -> list[dict]:
     print(f"║  API Base : {api_base_url:<53}║")
     print(f"║  Model    : {model_name:<53}║")
     print(f"║  Tasks    : {len(TASK_IDS):<53}║")
-    print(f"║  Sleep    : {task_sleep}s between tasks {'(adaptive 429 backoff enabled)':<25}║")
+    print(f"║  Sleep    : {task_sleep}s between tasks (TPM + TPD limit handling)         ║")
     print("╚══════════════════════════════════════════════════════════════════╝")
     print()
 
