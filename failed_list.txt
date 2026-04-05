@@ -1,0 +1,11 @@
+FAILED tests/test_environment.py::TestRewardClamping::test_perfect_score_reward_clamped
+FAILED tests/test_environment.py::TestDeterminism::test_same_score_3x[data_cleaning_easy]
+FAILED tests/test_environment.py::TestDeterminism::test_same_score_3x[data_cleaning_hard]
+FAILED tests/test_environment.py::TestDeterminism::test_same_score_3x[content_moderation_easy]
+FAILED tests/test_environment.py::TestDeterminism::test_same_score_3x[content_moderation_medium]
+FAILED tests/test_environment.py::TestDeterminism::test_same_partial_credits_3x[data_cleaning_easy]
+FAILED tests/test_environment.py::TestDeterminism::test_same_partial_credits_3x[data_cleaning_hard]
+FAILED tests/test_environment.py::TestDeterminism::test_same_partial_credits_3x[content_moderation_easy]
+FAILED tests/test_environment.py::TestDeterminism::test_same_partial_credits_3x[content_moderation_medium]
+FAILED tests/test_environment.py::TestGraderQuality::test_email_medium_perfect_order
+FAILED tests/test_environment.py::TestGraderQuality::test_data_hard_outlier_credit

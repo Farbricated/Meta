@@ -58,12 +58,12 @@ else:
 HF_TOKEN = API_KEY
 
 TASK_IDS = [
-    "email_triage_easy",       "email_triage_medium",       "email_triage_hard",       "email_triage_expert",
-    "code_review_easy",        "code_review_medium",         "code_review_hard",        "code_review_expert",
-    "data_cleaning_easy",      "data_cleaning_medium",       "data_cleaning_hard",      "data_cleaning_expert",
-    "content_moderation_easy", "content_moderation_medium",  "content_moderation_hard", "content_moderation_expert",
-    "ticket_triage_easy",      "ticket_triage_medium",       "ticket_triage_hard",      "ticket_triage_expert",
-    "cross_agent_chain",       "cross_agent_email_data",     "cross_agent_code_email",  "cross_agent_mod_escalation",
+    "email_triage_easy",        "email_triage_medium",        "email_triage_hard",         "email_triage_expert",
+    "code_review_easy",         "code_review_medium",         "code_review_hard",          "code_review_expert",
+    "data_cleaning_easy",       "data_cleaning_medium",       "data_cleaning_hard",        "data_cleaning_expert",
+    "content_moderation_easy",  "content_moderation_medium",  "content_moderation_hard",   "content_moderation_expert",
+    "ticket_triage_easy",       "ticket_triage_medium",       "ticket_triage_hard",        "ticket_triage_expert",
+    "cross_agent_chain",        "cross_agent_email_data",     "cross_agent_code_email",    "cross_agent_mod_escalation",
 ]
 
 SYSTEM_PROMPT = (

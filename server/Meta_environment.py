@@ -222,7 +222,7 @@ MOD_HARD = [
 
 TICKET_MEDIUM_TICKETS = [
     {"id": "tk1", "title": "Database connection pool exhausted — prod down",    "type": "bug",            "team": "backend",  "priority_rank": 1},
-    {"id": "tk2", "title": "Wrong currency symbol shown for EU customers",      "type": "bug",            "team": "frontend", "priority_rank": 3},
+    {"id": "tk2", "title": "EU checkout renders '$' instead of '€' — frontend display-layer bug", "type": "bug", "team": "frontend", "priority_rank": 3},
     {"id": "tk3", "title": "Add OAuth2 support for enterprise SSO",             "type": "feature_request","team": "backend",  "priority_rank": 5},
     {"id": "tk4", "title": "SSL cert expires in 48 hours on api.company.com",   "type": "bug",            "team": "devops",   "priority_rank": 2},
     {"id": "tk5", "title": "Invoice PDF generation fails for invoices > 50 lines","type": "bug",          "team": "backend",  "priority_rank": 4},
@@ -962,7 +962,8 @@ class MetaEnvironment(Environment):
                 base = min(base + (score - prev) * 0.1, 1.0)
         if score == 0.0 and attempt > 1:
             base = max(base - 0.05, 0.0)
-        return round(base, 3)
+        # Clamp to [0.0, 1.0] — reward shaping must never breach this
+        return round(max(0.0, min(1.0, base)), 3)
 
     def step(self, action: MetaAction) -> MetaObservation:
         self._state.step_count += 1
