@@ -1,19 +1,18 @@
 """
-inference.py — Meta OpenEnv Hackathon Submission v3.0
-19 tasks: 5 domains × 3 + 4 cross-agent chained tasks.
-Deterministic context, trajectory-aware reward, proper [START]/[STEP]/[END] logging.
+inference.py — Meta OpenEnv Hackathon Submission v3.1
+24 tasks: 5 domains × 4 (easy/medium/hard/expert) + 4 cross-agent chained tasks.
 
 Provider priority (auto-detected from env vars):
   1. GROQ_API_KEY  → https://api.groq.com/openai/v1  (llama-3.3-70b-versatile) [FREE]
   2. HF_TOKEN      → API_BASE_URL                     (Qwen/Qwen2.5-72B-Instruct)
   3. OPENAI_API_KEY → https://api.openai.com/v1       (gpt-4o-mini)
 
-Override everything with: API_BASE_URL + MODEL_NAME + HF_TOKEN (hackathon validator vars)
-
 Logging format:
   [START] task=<task_id> env=meta model=<model>
   [STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
-  [END]   success=<true|false> steps=<n> score=<0.000> rewards=<r1,r2,...>
+  [END]   success=<true|false> steps=<n> score=<0.00> rewards=<r1,r2,...>
+
+v3.1: adaptive backoff on 429 (Groq TPM limit 12k — avg ~690 tokens/req → safe at 1 req/3.5s)
 """
 
 from __future__ import annotations
@@ -35,26 +34,19 @@ if os.path.exists(_env_file):
                 _k, _, _v = _line.partition("=")
                 os.environ.setdefault(_k.strip(), _v.strip())
 
-# ── Mandatory env vars (spec-compliant) ──────────────────────────────────────
-# The hackathon validator sets API_BASE_URL + MODEL_NAME + HF_TOKEN.
-# We must respect those exactly. Groq is only used as local fallback
-# when HF_TOKEN is NOT set.
-
+# ── Provider resolution ───────────────────────────────────────────────────────
 _groq_key   = os.environ.get("GROQ_API_KEY", "")
 _hf_token   = os.environ.get("HF_TOKEN", "")
 _api_base   = os.environ.get("API_BASE_URL", "")
 _model_name = os.environ.get("MODEL_NAME", "")
 
-# Spec-required defaults
 API_BASE_URL = _api_base   or "https://router.huggingface.co/v1"
 MODEL_NAME   = _model_name or "Qwen/Qwen2.5-72B-Instruct"
 
 if _hf_token:
-    # HF_TOKEN set — hackathon validator mode or HF local run
     API_KEY  = _hf_token
     PROVIDER = "huggingface"
 elif _groq_key:
-    # No HF_TOKEN — use Groq as free local fallback
     API_BASE_URL = "https://api.groq.com/openai/v1"
     MODEL_NAME   = "llama-3.3-70b-versatile"
     API_KEY      = _groq_key
@@ -63,17 +55,15 @@ else:
     API_KEY  = ""
     PROVIDER = "none"
 
-# Keep HF_TOKEN alias for backward compat
 HF_TOKEN = API_KEY
 
-
 TASK_IDS = [
-    "email_triage_easy",        "email_triage_medium",        "email_triage_hard",         "email_triage_expert",
-    "code_review_easy",         "code_review_medium",         "code_review_hard",          "code_review_expert",
-    "data_cleaning_easy",       "data_cleaning_medium",       "data_cleaning_hard",        "data_cleaning_expert",
-    "content_moderation_easy",  "content_moderation_medium",  "content_moderation_hard",   "content_moderation_expert",
-    "ticket_triage_easy",       "ticket_triage_medium",       "ticket_triage_hard",        "ticket_triage_expert",
-    "cross_agent_chain",        "cross_agent_email_data",     "cross_agent_code_email",    "cross_agent_mod_escalation",
+    "email_triage_easy",       "email_triage_medium",       "email_triage_hard",       "email_triage_expert",
+    "code_review_easy",        "code_review_medium",         "code_review_hard",        "code_review_expert",
+    "data_cleaning_easy",      "data_cleaning_medium",       "data_cleaning_hard",      "data_cleaning_expert",
+    "content_moderation_easy", "content_moderation_medium",  "content_moderation_hard", "content_moderation_expert",
+    "ticket_triage_easy",      "ticket_triage_medium",       "ticket_triage_hard",      "ticket_triage_expert",
+    "cross_agent_chain",       "cross_agent_email_data",     "cross_agent_code_email",  "cross_agent_mod_escalation",
 ]
 
 SYSTEM_PROMPT = (
@@ -89,6 +79,11 @@ SYSTEM_PROMPT = (
 
 SUCCESS_SCORE_THRESHOLD = 0.5
 
+# Groq free tier: 12,000 TPM, avg ~690 tokens/req → safe floor = 3.5s
+# Actual logs show 8.7% rate-limit rate at 2s sleep → bumped to 3.5s
+GROQ_SLEEP    = 3.5
+DEFAULT_SLEEP = 1.0
+
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -97,22 +92,15 @@ def log_start(task: str, env: str, model: str) -> None:
 
 
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
-    error_val = error if error else "null"
-    done_val  = str(done).lower()
-    # Collapse action to single line, truncate to 120 chars
+    error_val      = error if error else "null"
+    done_val       = str(done).lower()
     action_oneline = action.replace("\n", " ")[:120]
-    print(
-        f"[STEP] step={step} action={action_oneline} reward={reward:.2f} done={done_val} error={error_val}",
-        flush=True,
-    )
+    print(f"[STEP] step={step} action={action_oneline} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
 
 
 def log_end(success: bool, steps: int, score: float, rewards: list[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(
-        f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}",
-        flush=True,
-    )
+    print(f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}", flush=True)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -171,7 +159,9 @@ def unwrap_payload(payload: dict) -> dict:
 
 
 def call_model(client, task_id: str, difficulty: str, instructions: str,
-               agent_ctx: dict, feedback: Optional[str] = None) -> dict:
+               agent_ctx: dict, feedback: Optional[str] = None,
+               is_groq: bool = False) -> dict:
+    """Call the model with adaptive retry on 429 rate-limit errors."""
     retry_note = ""
     if feedback:
         retry_note = (
@@ -186,31 +176,47 @@ def call_model(client, task_id: str, difficulty: str, instructions: str,
         f"Data to work with:\n{json.dumps(agent_ctx, indent=2)}\n\n"
         "Respond with ONLY the payload JSON object. Start with { and end with }."
     )
-    try:
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user",   "content": user_prompt},
-            ],
-            temperature=0.0,
-            max_tokens=2000,
-        )
-        raw     = response.choices[0].message.content or ""
-        payload = unwrap_payload(extract_json(raw))
-        if not payload:
-            print(f"\n    [DEBUG] Empty JSON. Raw: {repr(raw[:200])}")
-        else:
-            print(f"\n    [DEBUG] Attempt payload keys: {list(payload.keys())}")
-        return payload
-    except Exception as e:
-        print(f"\n    [ERROR] API call failed: {e}")
-        return {}
+
+    max_api_retries = 4
+    backoff = 4.0
+    for attempt in range(max_api_retries):
+        try:
+            response = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user",   "content": user_prompt},
+                ],
+                temperature=0.0,
+                max_tokens=2000,
+            )
+            raw     = response.choices[0].message.content or ""
+            payload = unwrap_payload(extract_json(raw))
+            if not payload:
+                print(f"\n    [DEBUG] Empty JSON. Raw: {repr(raw[:200])}")
+            else:
+                print(f"\n    [DEBUG] Payload keys: {list(payload.keys())}")
+            return payload
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "rate_limit" in err_str.lower():
+                # Parse suggested wait time from error message if available
+                wait_match = re.search(r"try again in ([\d.]+)", err_str)
+                wait_time  = float(wait_match.group(1)) + 0.5 if wait_match else backoff
+                wait_time  = max(wait_time, backoff)
+                print(f"\n    [RATE LIMIT] Waiting {wait_time:.1f}s before retry {attempt+1}/{max_api_retries}...")
+                time.sleep(wait_time)
+                backoff = min(backoff * 1.5, 30.0)
+            else:
+                print(f"\n    [ERROR] API call failed: {e}")
+                return {}
+    print(f"\n    [ERROR] All {max_api_retries} retries exhausted.")
+    return {}
 
 
 # ── Single task episode ───────────────────────────────────────────────────────
 
-def run_task(client, task_id: str, INSTRUCTIONS: dict) -> dict:
+def run_task(client, task_id: str, INSTRUCTIONS: dict, is_groq: bool = False) -> dict:
     from server.Meta_environment import MetaEnvironment
     from models import MetaAction
 
@@ -243,17 +249,18 @@ def run_task(client, task_id: str, INSTRUCTIONS: dict) -> dict:
     log_start(task_id, "meta", MODEL_NAME)
 
     # Attempt 1
-    payload  = call_model(client, task_id, difficulty, instructions, agent_ctx)
-    action   = MetaAction(message=json.dumps({"agent": agent, "task_id": task_id, "payload": payload}))
-    obs      = env2.step(action)
+    payload = call_model(client, task_id, difficulty, instructions, agent_ctx, is_groq=is_groq)
+    action  = MetaAction(message=json.dumps({"agent": agent, "task_id": task_id, "payload": payload}))
+    obs     = env2.step(action)
     rewards.append(obs.reward)
     log_step(1, json.dumps(payload)[:80], obs.reward, obs.done, None)
 
     # Attempt 2 if retry available
     if not obs.done and obs.score < 1.0:
-        print(f"\n    [RETRY] Score {obs.score:.2f} — attempting retry with feedback...")
-        time.sleep(1)
-        payload2 = call_model(client, task_id, difficulty, instructions, agent_ctx, feedback=obs.feedback)
+        print(f"\n    [RETRY] Score {obs.score:.2f} — retrying with feedback...")
+        time.sleep(GROQ_SLEEP if is_groq else 1.0)
+        payload2 = call_model(client, task_id, difficulty, instructions, agent_ctx,
+                              feedback=obs.feedback, is_groq=is_groq)
         action2  = MetaAction(message=json.dumps({"agent": agent, "task_id": task_id, "payload": payload2}))
         obs      = env2.step(action2)
         rewards.append(obs.reward)
@@ -279,7 +286,6 @@ def run_all(api_base_url: str, model_name: str, hf_token: str) -> list[dict]:
     api_key = hf_token or API_KEY
     if not api_key:
         print("ERROR: No API key found.")
-        print("Set one of:")
         print("  GROQ_API_KEY=gsk_...   (free at https://console.groq.com)")
         print("  HF_TOKEN=hf_...        (HuggingFace token)")
         sys.exit(1)
@@ -297,9 +303,8 @@ def run_all(api_base_url: str, model_name: str, hf_token: str) -> list[dict]:
         print(f"ERROR: {e}")
         sys.exit(1)
 
-    # Groq free tier: 30 req/min — add a small sleep between tasks
-    is_groq  = "groq.com" in api_base_url
-    task_sleep = 2.0 if is_groq else 1.0
+    is_groq    = "groq.com" in api_base_url
+    task_sleep = GROQ_SLEEP if is_groq else DEFAULT_SLEEP
 
     client  = OpenAI(api_key=api_key, base_url=api_base_url)
     results: list[dict] = []
@@ -312,6 +317,7 @@ def run_all(api_base_url: str, model_name: str, hf_token: str) -> list[dict]:
     print(f"║  API Base : {api_base_url:<53}║")
     print(f"║  Model    : {model_name:<53}║")
     print(f"║  Tasks    : {len(TASK_IDS):<53}║")
+    print(f"║  Sleep    : {task_sleep}s between tasks {'(adaptive 429 backoff enabled)':<25}║")
     print("╚══════════════════════════════════════════════════════════════════╝")
     print()
 
@@ -322,7 +328,7 @@ def run_all(api_base_url: str, model_name: str, hf_token: str) -> list[dict]:
         sys.stdout.flush()
 
         t0      = time.time()
-        result  = run_task(client, task_id, INSTRUCTIONS)
+        result  = run_task(client, task_id, INSTRUCTIONS, is_groq=is_groq)
         elapsed = time.time() - t0
         results.append(result)
 
@@ -346,10 +352,7 @@ def run_all(api_base_url: str, model_name: str, hf_token: str) -> list[dict]:
     print("╚══════════════════════════════════════════════════════════════════╝")
     print()
 
-    agents = [
-        "email_triage", "code_review", "data_cleaning",
-        "content_moderation", "ticket_triage", "cross_agent",
-    ]
+    agents = ["email_triage","code_review","data_cleaning","content_moderation","ticket_triage","cross_agent"]
     print("  Per-Agent Summary:")
     for ag in agents:
         ag_r   = [r for r in results if r["agent"] == ag]
