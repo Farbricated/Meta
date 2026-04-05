@@ -7,7 +7,7 @@ description: >
   Built for multi-task learning, transfer learning, and generalist agent research.
   v3.0: deterministic context loading, harder hard tasks (8 vulnerabilities,
   adversarial content moderation), 5th domain, 4 cross-agent chained tasks.
-version: "3.1.0"
+version: "3.2.0"
 type: space
 runtime: fastapi
 app: server.app:app
@@ -230,3 +230,8 @@ baseline:
     cross_agent_email_data: 0.67
     cross_agent_code_email: 0.67
     cross_agent_mod_escalation: 0.83
+    email_triage_expert: 1.00
+    code_review_expert: 1.00
+    data_cleaning_expert: 1.00
+    content_moderation_expert: 1.00
+    ticket_triage_expert: 1.00

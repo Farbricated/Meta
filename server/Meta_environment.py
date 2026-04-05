@@ -1,5 +1,5 @@
 """
-Meta Multi-Agent Environment v3.1
+Meta Multi-Agent Environment v3.2
 
 Five real-world AI agent domains, 24 tasks total:
   1. Email Triage        — classify, prioritize, draft replies, executive escalation
@@ -14,7 +14,7 @@ Cross-agent chained tasks (4 total):
   cross_agent_code_email     — vulnerability detection + security disclosure email
   cross_agent_mod_escalation — content moderation + moderation notice drafting
 
-v3.1 fixes:
+v3.2 fixes:
   - Expert grader dispatch wired into _grade()
   - grade_data_easy accepts per-episode context (fixes 0-score on procedural rows)
   - All graders accept per-episode context (grade_mod_easy/medium, grade_data_hard)
@@ -792,7 +792,7 @@ INSTRUCTIONS: dict[str, str] = {
 # ═══════════════════════════════════════════════════════════════════════════
 
 class MetaEnvironment(Environment):
-    """Meta Multi-Agent Environment v3.1 — 24 tasks across 5 domains + expert tier."""
+    """Meta Multi-Agent Environment v3.2 — 24 tasks across 5 domains + expert tier."""
 
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
 
@@ -816,7 +816,7 @@ class MetaEnvironment(Environment):
         return MetaObservation(
             agent="meta", task_id="", difficulty="", context={},
             instructions=(
-                "Welcome to Meta v3.1 — 24 tasks across 5 domains + expert tier.\n"
+                "Welcome to Meta v3.2 — 24 tasks across 5 domains + expert tier.\n"
                 "Agents: email_triage | code_review | data_cleaning | content_moderation | ticket_triage | cross_agent\n"
                 "Use GET /tasks for all task IDs and payload schemas."
             ),

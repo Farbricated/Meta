@@ -1,5 +1,5 @@
 """
-FastAPI application for Meta Multi-Agent Environment v3.0
+FastAPI application for Meta Multi-Agent Environment v3.2
 
 Standard OpenEnv endpoints (from create_app):
     POST /reset    — Reset environment
@@ -11,7 +11,7 @@ Standard OpenEnv endpoints (from create_app):
     WS   /ws       — WebSocket persistent session
 
 Custom Meta endpoints:
-    GET  /tasks    — All 19 tasks with payload schemas
+    GET  /tasks    — All 24 tasks with payload schemas
     POST /grader   — Score an action without side effects
     POST /baseline — Run baseline across all tasks
     GET  /ui       — Gradio interactive frontend
@@ -224,13 +224,54 @@ TASK_REGISTRY = [
         "description": "Classify the content AND decide escalation AND draft a moderation notice.",
         "action_schema": {"message": json.dumps({"agent": "cross_agent", "task_id": "cross_agent_mod_escalation", "payload": {"content_label": "harmful", "escalate": True, "moderation_notice": "..."}})},
     },
+    # Expert Tier
+    {
+        "id": "email_triage_expert",
+        "name": "Executive Escalation Reply",
+        "agent": "email_triage",
+        "difficulty": "expert",
+        "description": "Draft an executive reply to a 4-week escalated enterprise complaint with account metadata and engineering root cause.",
+        "action_schema": {"message": json.dumps({"agent": "email_triage", "task_id": "email_triage_expert", "payload": {"reply": "<full executive reply text>"}})},
+    },
+    {
+        "id": "code_review_expert",
+        "name": "Advanced Security Audit (8 subtle vulns)",
+        "agent": "code_review",
+        "difficulty": "expert",
+        "description": "Identify 8 subtle vulnerabilities: hardcoded secret, JWT none-algorithm, mass assignment, IDOR, YAML RCE, TOCTOU race, prototype pollution, log injection.",
+        "action_schema": {"message": json.dumps({"agent": "code_review", "task_id": "code_review_expert", "payload": {"vulnerabilities": [{"type": "hardcoded_secret", "location": "fn_name", "severity": "critical", "fix": "..."}]}})},
+    },
+    {
+        "id": "data_cleaning_expert",
+        "name": "Multi-Dataset Join & Revenue Analysis",
+        "agent": "data_cleaning",
+        "difficulty": "expert",
+        "description": "Join two datasets, detect anomalies, convert currencies to USD, compute per-rep revenue excluding invalid transactions.",
+        "action_schema": {"message": json.dumps({"agent": "data_cleaning", "task_id": "data_cleaning_expert", "payload": {"data_quality_issues": ["..."], "suspicious_transactions": ["..."], "revenue_by_rep": {"R05": 3625.50}, "excluded_transactions": ["..."]}})},
+    },
+    {
+        "id": "content_moderation_expert",
+        "name": "Contested Policy Rulings (5 cases)",
+        "agent": "content_moderation",
+        "difficulty": "expert",
+        "description": "Issue rulings on 5 genuinely contested cases: suicidal ideation, great-replacement rhetoric, conscientious objection, antisemitic satire, health misinformation.",
+        "action_schema": {"message": json.dumps({"agent": "content_moderation", "task_id": "content_moderation_expert", "payload": {"rulings": [{"id": "p1", "ruling": "keep_with_intervention", "principle": "harm reduction"}]}})},
+    },
+    {
+        "id": "ticket_triage_expert",
+        "name": "Board-Ready PIR Report",
+        "agent": "ticket_triage",
+        "difficulty": "expert",
+        "description": "Produce a Post-Incident Review from a 4h17m outage timeline. Requires timeline gaps, 5+ action items, and quantified MTTR breakdown.",
+        "action_schema": {"message": json.dumps({"agent": "ticket_triage", "task_id": "ticket_triage_expert", "payload": {"root_cause": "...", "contributing_factors": ["..."], "timeline_gaps": ["..."], "action_items": ["..."], "severity_justification": "...", "mttr_analysis": "..."}})},
+    },
 ]
 
 
 @app.get("/tasks")
 def list_tasks():
     return {
-        "environment": "Meta Multi-Agent v3.0",
+        "environment": "Meta Multi-Agent v3.2",
         "total_tasks": len(TASK_REGISTRY),
         "agents": ["email_triage", "code_review", "data_cleaning", "content_moderation", "ticket_triage", "cross_agent"],
         "how_to_step": (
@@ -281,7 +322,7 @@ async def baseline():
         scores = run_all_baselines(api_key=api_key, api_base_url=api_base_url, model_name=model_name)
         avg = round(sum(s["score"] for s in scores) / len(scores), 3)
         return {
-            "environment":     "Meta Multi-Agent v3.0",
+            "environment":     "Meta Multi-Agent v3.2",
             "model":           model_name,
             "api_base":        api_base_url,
             "average_score":   avg,
