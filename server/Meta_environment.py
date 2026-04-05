@@ -748,7 +748,7 @@ INSTRUCTIONS: dict[str, str] = {
         "  8. ssrf in fetch_user_avatar\n"
         "Payload: {\"vulnerabilities\": [{\"type\": \"...\", \"location\": \"...\", \"severity\": \"...\", \"fix\": \"...\"}]}"
     ),
-    "data_cleaning_easy": "Find all missing (null) values by field+row, and identify duplicate row IDs.\nPayload: {\"missing\": [\"age (row 2)\", \"name (row 4)\"], \"duplicates\": [1, 3]}",
+    "data_cleaning_easy": "Find all missing (null) values. Format EXACTLY as 'fieldname (row N)' using lowercase fieldname — e.g. 'age (row 2)', 'name (row 4)', 'email (row 5)', 'salary (row 6)'. Also list duplicate row IDs as integers. Check EVERY row and EVERY field carefully.\nPayload: {\"missing\": [\"age (row 2)\", \"name (row 4)\"], \"duplicates\": [1, 3]}",
     "data_cleaning_medium": "Identify all 5 data quality issues and return the fully cleaned dataset (5 rows).\nPayload: {\"issues\": {\"age\": \"mixed types...\"}, \"cleaned_data\": [...]}",
     "data_cleaning_hard": "Detect outliers (IQR/z-score), find missing values, impute, return cleaned dataset.\nPayload: {\"outliers\": [4, 8], \"missing\": [6, 11], \"cleaned_data\": [...]}",
     "content_moderation_easy": "Classify each post as 'safe' or 'harmful'.\nPayload: {\"classifications\": [{\"id\": \"c1\", \"label\": \"harmful\"}]}",

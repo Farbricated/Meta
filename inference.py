@@ -227,10 +227,6 @@ def call_model(client, task_id: str, difficulty: str, instructions: str,
             )
             raw     = response.choices[0].message.content or ""
             payload = unwrap_payload(extract_json(raw))
-            if not payload:
-                print(f"\n    [DEBUG] Empty JSON. Raw: {repr(raw[:200])}")
-            else:
-                print(f"\n    [DEBUG] Payload keys: {list(payload.keys())}")
             return payload
 
         except Exception as e:

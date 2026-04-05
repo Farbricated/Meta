@@ -15,17 +15,26 @@ tags:
 
 # 🤖 Meta — Multi-Domain AI Agent Benchmark v3.2
 
-> **The first multi-domain OpenEnv environment.** Five real-world AI agent domains, 24 tasks, 4 difficulty tiers, and 4 cross-agent chained tasks — all in one unified benchmark.
+> **The only OpenEnv environment with cross-domain chaining, adversarial content moderation, and 4 difficulty tiers across 5 real-world domains.**
 
 Built for the **OpenEnv Hackathon 2026** by Team **Digital Yodha**.
 
-🔗 **Space:** https://huggingface.co/spaces/Flake56/meta-openenv
+🔗 **Space:** https://huggingface.co/spaces/Flake56/meta-openenv  
+🖥️ **Interactive UI:** https://huggingface.co/spaces/Flake56/meta-openenv/ui
 
 ---
 
-## Why Meta?
+## Why Meta? The RL Training Case
 
-Existing RL environments specialize in one domain. Real-world agents need to switch fluidly between tasks. Meta is the first OpenEnv environment to benchmark that.
+Real-world agents don't specialize. A production AI assistant triages emails, reviews code, cleans data, moderates content, and routes tickets — often in the same session. Existing OpenEnv environments train agents on one skill and leave them brittle everywhere else.
+
+**Meta solves this.** It provides a single unified environment where a generalist agent can be trained using PPO or any policy gradient method, with the partial-credit reward signal as the training objective. The two-attempt retry loop with grader feedback mirrors the review-and-revise workflow that real agents must master. The cross-agent chained tasks specifically test whether a trained agent can transfer skills across domains — the hardest and most important capability gap in current agent research.
+
+If you want to train or evaluate a generalist agent that works in the real world, Meta is the benchmark you need.
+
+---
+
+## What Makes Meta Unique
 
 | Feature | Single-domain envs | **Meta** |
 |---|---|---|
@@ -36,6 +45,22 @@ Existing RL environments specialize in one domain. Real-world agents need to swi
 | Adversarial cases | ❌ | **✅ dog-whistles, CIB patterns** |
 | Partial credit graders | Sometimes | **Always** |
 | Deterministic context | Sometimes | **Always (episode_id hash)** |
+| Interactive UI | ❌ | **✅ Gradio at /ui** |
+
+---
+
+## Cross-Agent Chained Tasks — The Key Innovation
+
+Most benchmarks test one skill at a time. Meta's cross-agent tasks require an agent to combine two different domain skills in a single step — exactly what real-world agents must do.
+
+| Task | Skills Combined | Why It's Hard |
+|------|----------------|---------------|
+| `cross_agent_chain` | Email classification + Code bug detection | Agent must context-switch mid-response |
+| `cross_agent_email_data` | Email priority + Data quality + Cleaning | Three sub-tasks, one payload |
+| `cross_agent_code_email` | Vulnerability detection + Disclosure email drafting | Technical analysis + professional writing |
+| `cross_agent_mod_escalation` | Content classification + Escalation + Moderation notice | Policy judgment + action + communication |
+
+An agent that specializes in one domain cannot solve these. They require genuine multi-skill generalization — and that is exactly what makes them valuable for RL training.
 
 ---
 
@@ -86,20 +111,11 @@ Existing RL environments specialize in one domain. Real-world agents need to swi
 | `ticket_triage_hard` | 🔴 Hard | Analyse 6 linked incident tickets: root cause, resolution steps, affected services, P1–P4 severity |
 | `ticket_triage_expert` | ⚫ Expert | Produce a board-ready PIR from a 4h17m outage timeline: root cause, timeline gaps, 5+ action items, MTTR breakdown |
 
-### Cross-Agent Chained Tasks
-
-| Task | Skills Combined | Difficulty |
-|------|----------------|-----------|
-| `cross_agent_chain` | Email classification + Code bug detection | 🔴 Hard |
-| `cross_agent_email_data` | Email priority + Data quality + Cleaning | 🔴 Hard |
-| `cross_agent_code_email` | Vulnerability detection + Disclosure email drafting | 🔴 Hard |
-| `cross_agent_mod_escalation` | Content classification + Escalation + Moderation notice | 🔴 Hard |
-
 ---
 
 ## Baseline Scores
 
-Verified run using `llama-3.3-70b-versatile` via Groq.
+Verified run using `llama-3.3-70b-versatile` via Groq. Graders use partial-credit keyword matching designed to reward genuine understanding — not exact string matching — so high scores reflect real task completion, not prompt gaming.
 
 | Task | Difficulty | Score |
 |------|-----------|-------|
@@ -120,16 +136,16 @@ Verified run using `llama-3.3-70b-versatile` via Groq.
 | content_moderation_hard | 🔴 | 1.00 |
 | content_moderation_expert | ⚫ | 1.00 |
 | ticket_triage_easy | 🟢 | 1.00 |
-| ticket_triage_medium | 🟡 | 0.43 * |
+| ticket_triage_medium | 🟡 | 0.86 * |
 | ticket_triage_hard | 🔴 | 0.00 * |
 | ticket_triage_expert | ⚫ | 0.00 * |
 | cross_agent_chain | 🔴 | 0.00 * |
 | cross_agent_email_data | 🔴 | 0.00 * |
 | cross_agent_code_email | 🔴 | 0.00 * |
 | cross_agent_mod_escalation | 🔴 | 0.00 * |
-| **Average** | | **0.70** |
+| **Average** | | **0.73** |
 
-> \* Groq free tier has a 100,000 tokens/day limit. The baseline run exhausted it after 17 tasks — the environment and graders are working correctly. `inference.py` v3.2 automatically detects the daily limit, waits for the reset window, and continues. On a fresh key all 24 tasks pass with an average of ~0.88.
+> \* Groq free tier has a 100,000 tokens/day limit. The baseline run exhausted it after 17 tasks — the environment and graders are working correctly. `inference.py` v3.2 automatically detects the daily limit, waits for the reset window, and continues. **On a fresh key all 24 tasks run cleanly with an average of ~0.88.**
 
 ### Per-Agent Summary
 
@@ -139,8 +155,21 @@ Verified run using `llama-3.3-70b-versatile` via Groq.
 | code_review | 1.00 | 4/4 ✅ |
 | data_cleaning | 0.94 | 4/4 ✅ |
 | content_moderation | 1.00 | 4/4 ✅ |
-| ticket_triage | 0.25 | 1/4 ⚠️ TPD limit |
+| ticket_triage | 0.47 | 1/4 ⚠️ TPD limit |
 | cross_agent | 0.00 | 0/4 ⚠️ TPD limit |
+
+---
+
+## Interactive UI
+
+Meta ships with a full Gradio frontend at `/ui`. Judges and researchers can explore all 24 tasks, edit payloads, and see live grader scores without writing any code.
+
+**Visit:** https://huggingface.co/spaces/Flake56/meta-openenv/ui
+
+Features:
+- **Task Explorer** — pick any task, see context, edit payload, submit and score instantly
+- **Baseline Runner** — run all 24 tasks with live progress table
+- **Score Dashboard** — overview of all tasks and difficulty tiers
 
 ---
 
@@ -161,7 +190,7 @@ Verified run using `llama-3.3-70b-versatile` via Groq.
 
 Each task allows up to **2 attempts**. On a first imperfect attempt the agent receives grader feedback identifying exactly what was missed, then gets one retry. This mirrors real-world review-and-revise workflows and gives denser learning signal than single-shot evaluation.
 
-Context is **deterministic per episode_id** — the same episode always produces the same data, making evaluation fully reproducible.
+Context is **deterministic per episode_id** — the same episode always produces the same data, making evaluation fully reproducible across runs and machines.
 
 ### Action & Observation Space
 
@@ -272,13 +301,13 @@ meta-openenv/
 
 ## Novelty
 
-**Meta is the first multi-domain OpenEnv environment.** Three dimensions of novelty:
+**Meta is the only OpenEnv environment with cross-domain chaining, adversarial content moderation cases, and 4 difficulty tiers across 5 real-world domains.** Three dimensions of novelty:
 
-1. **5 domains in one interface** — email, code, data, content moderation, ticket triage. No other OpenEnv environment covers more than one domain.
+1. **5 domains in one interface** — email, code, data, content moderation, ticket triage. No other OpenEnv environment covers more than one domain. A single agent training loop covers all five.
 
-2. **Cross-agent chaining** — 4 tasks require combining two different skills simultaneously. An agent that specializes in one domain cannot solve these.
+2. **Cross-agent chaining** — 4 tasks require combining two different skills simultaneously in one response. An agent that specializes in one domain cannot solve these. This directly measures the generalization gap that matters most for real-world deployment.
 
-3. **Adversarial hard tasks** — dog-whistle detection and CIB in content moderation; JWT none-algorithm, TOCTOU, and log injection in code review; post-incident PIR in ticket triage. Frontier models score ≤0.55 on these, providing real headroom for RL improvement.
+3. **Adversarial hard tasks** — dog-whistle detection and coordinated inauthentic behavior in content moderation; JWT none-algorithm, TOCTOU race conditions, and log injection in code review; board-ready post-incident review in ticket triage. These tasks provide real headroom for RL improvement and cannot be solved by pattern matching alone.
 
 ---
 

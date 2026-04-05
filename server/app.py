@@ -14,8 +14,7 @@ Custom Meta endpoints:
     GET  /tasks    — All 24 tasks with payload schemas
     POST /grader   — Score an action without side effects
     POST /baseline — Run baseline across all tasks
-    GET  /ui       — Gradio interactive frontend
-    GET  /         — Redirects to /ui
+    POST /step/typed/{task_id} — Typed action format
 """
 
 from __future__ import annotations
@@ -25,7 +24,7 @@ import os
 import sys
 
 from fastapi import Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 
 from openenv.core.env_server.http_server import create_app
 
@@ -50,18 +49,7 @@ app = create_app(
     max_concurrent_envs=20,
 )
 
-# ── Mount Gradio UI ───────────────────────────────────────────────────────────
-try:
-    from server.gradio_ui import mount_gradio
-    mount_gradio(app)
-except ImportError as e:
-    print(f"[WARN] Gradio UI not mounted: {e}")
 
-
-# ── Root redirect ─────────────────────────────────────────────────────────────
-@app.get("/")
-def root():
-    return RedirectResponse(url="/ui")
 
 
 # ── Task Registry ─────────────────────────────────────────────────────────────
